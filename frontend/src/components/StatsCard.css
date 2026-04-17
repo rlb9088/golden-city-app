@@ -1,0 +1,87 @@
+.stats-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-lg);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  transition: all var(--transition-normal);
+  position: relative;
+  overflow: hidden;
+}
+
+.stats-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity var(--transition-normal);
+  pointer-events: none;
+}
+
+.stats-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.stats-card:hover::before {
+  opacity: 1;
+}
+
+/* Variants */
+.stats-card--positive { border-left: 3px solid var(--accent-green); }
+.stats-card--positive::before { background: linear-gradient(135deg, var(--accent-green-dim), transparent); }
+.stats-card--positive .stats-card-value { color: var(--accent-green); }
+
+.stats-card--negative { border-left: 3px solid var(--accent-red); }
+.stats-card--negative::before { background: linear-gradient(135deg, var(--accent-red-dim), transparent); }
+.stats-card--negative .stats-card-value { color: var(--accent-red); }
+
+.stats-card--gold { border-left: 3px solid var(--accent-gold); }
+.stats-card--gold::before { background: linear-gradient(135deg, var(--accent-gold-glow), transparent); }
+.stats-card--gold .stats-card-value { color: var(--accent-gold); }
+
+.stats-card--neutral { border-left: 3px solid var(--accent-blue); }
+.stats-card--neutral::before { background: linear-gradient(135deg, var(--accent-blue-dim), transparent); }
+
+.stats-card-icon {
+  font-size: 2rem;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.stats-card-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.stats-card-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stats-card-value {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+
+.stats-card-subtitle {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}

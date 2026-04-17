@@ -1,0 +1,111 @@
+/* Configuracion Admin page styles */
+
+.tabs-header {
+  display: flex;
+  gap: var(--space-sm);
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: var(--space-sm);
+  margin-bottom: var(--space-lg);
+  scrollbar-width: thin;
+}
+
+.tab-btn {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  padding: 0.5rem 1rem;
+  min-height: 44px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.tab-btn:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.tab-btn.active {
+  background: var(--surface-lighter);
+  color: var(--accent-gold);
+  border-color: var(--border);
+  box-shadow: 0 0 10px rgba(234, 179, 8, 0.1);
+}
+
+.config-section {
+  animation: fadeIn 0.3s ease;
+}
+
+.config-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-lg);
+}
+
+.config-section-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Inline form for adding new records */
+.add-row-form {
+  display: flex;
+  gap: var(--space-sm);
+  background: var(--surface-light);
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--border);
+  margin-bottom: var(--space-lg);
+  align-items: flex-end;
+}
+
+.add-row-form .field-group {
+  margin-bottom: 0;
+  flex: 1;
+}
+
+.add-row-form .btn {
+  white-space: nowrap;
+}
+
+/* CSV Import Area */
+.csv-import-area {
+  margin-bottom: var(--space-lg);
+}
+
+.textarea.csv-textarea {
+  font-family: inherit;
+  min-height: 120px;
+  resize: vertical;
+}
+
+.btn-icon {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.25rem;
+  border-radius: var(--radius-sm);
+  font-size: 1.2rem;
+}
+
+.btn-icon:hover {
+  color: var(--accent-red);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+@media (max-width: 768px) {
+  .add-row-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .add-row-form .btn {
+    width: 100%;
+  }
+}

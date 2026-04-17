@@ -1,0 +1,12 @@
+/* Bancos page specific styles */
+.upsert-warning {
+  grid-column: 1 / -1;
+  background: var(--accent-orange-dim);
+  border: 1px solid rgba(251, 146, 60, 0.4);
+  color: var(--accent-orange);
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  margin-bottom: var(--space-md);
+  animation: fadeIn 0.3s ease forwards;
+}
