@@ -13,7 +13,6 @@ const logger = require('./lib/logger');
 const app = express();
 app.set('trust proxy', 1);
 
-const port = process.env.PORT || 3001;
 const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:3000';
 
 function parseRateLimitConfig(rawValue, fallback) {
@@ -137,11 +136,15 @@ app.use(notFoundHandler);
 app.use(errorHandler);
 
 if (require.main === module) {
-  app.listen(port, () => {
+  const PORT = process.env.PORT || 3000;
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on ${PORT}`);
     logger.info('Golden City Backend running', {
       context: {
-        port,
-        mode: (process.env.GOOGLE_APPLICATION_CREDENTIALS && process.env.GOOGLE_SHEET_ID)
+        port: PORT,
+        host: '0.0.0.0',
+        mode: (process.env.GOOGLE_CREDENTIALS_BASE64 && process.env.GOOGLE_SHEET_ID)
           ? 'Google Sheets'
           : 'In-Memory (dev)',
       },
