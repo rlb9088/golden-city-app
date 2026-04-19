@@ -15,47 +15,28 @@ function getVisionClient() {
 async function analyzeReceipt(base64Image) {
   const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, '');
   const visionClient = getVisionClient();
-
-  if (!visionClient) {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve({
-          monto: 150.50,
-          fecha: new Date().toISOString().split('T')[0],
-          isMock: true,
-          rawText: 'Mocked Vision response S/ 150.50',
-        });
-      }, 1500);
-    });
-  }
+  const engine = visionClient ? 'vision' : 'tesseract';
 
   try {
-    let rawText = '';
-
-    try {
-      const [result] = await visionClient.documentTextDetection({
-        image: { content: base64Data },
-      });
-      const maxResults = result.fullTextAnnotation;
-      rawText = maxResults ? maxResults.text : '';
-    } catch (visionError) {
-      logger.warn('Google Vision OCR failed. Falling back to Tesseract.', {
-        context: { component: 'ocr.visionFallback' },
-        error: visionError,
-      });
-      const tesseract = require('tesseract.js');
-      const imgBuffer = Buffer.from(base64Data, 'base64');
-      const { data } = await tesseract.recognize(imgBuffer, 'spa', {
-        logger: () => {},
-      });
-      rawText = data.text;
-    }
+    const rawText = visionClient
+      ? await detectTextWithVision(base64Data, visionClient)
+      : await detectTextWithTesseract(base64Data, 'Google Vision credentials are not configured');
 
     if (!rawText || rawText.trim() === '') {
       throw new Error('No se detecto texto en la imagen.');
     }
 
     const { amount, date } = extractFinancialData(rawText);
+
+    logger.info('OCR receipt analyzed', {
+      context: {
+        component: 'ocr.analyzeReceipt',
+        engine,
+        amount,
+        date,
+        hasText: Boolean(rawText && rawText.trim()),
+      },
+    });
 
     return {
       monto: amount,
@@ -70,6 +51,42 @@ async function analyzeReceipt(base64Image) {
     });
     throw new Error('Error al procesar comprobante con OCR');
   }
+}
+
+async function detectTextWithVision(base64Data, visionClient) {
+  try {
+    logger.info('Using Google Vision OCR', {
+      context: {
+        component: 'ocr.detectTextWithVision',
+      },
+    });
+
+    const [result] = await visionClient.documentTextDetection({
+      image: { content: base64Data },
+    });
+    return result.fullTextAnnotation ? result.fullTextAnnotation.text : '';
+  } catch (visionError) {
+    logger.warn('Google Vision OCR failed. Falling back to Tesseract.', {
+      context: { component: 'ocr.visionFallback' },
+      error: visionError,
+    });
+
+    return detectTextWithTesseract(base64Data, 'Google Vision request failed');
+  }
+}
+
+async function detectTextWithTesseract(base64Data, reason) {
+  logger.warn('Using Tesseract OCR fallback.', {
+    context: { component: 'ocr.tesseractFallback', reason },
+  });
+
+  const tesseract = require('tesseract.js');
+  const imgBuffer = Buffer.from(base64Data, 'base64');
+  const { data } = await tesseract.recognize(imgBuffer, 'spa', {
+    logger: () => {},
+  });
+
+  return data.text || '';
 }
 
 function extractFinancialData(rawText) {

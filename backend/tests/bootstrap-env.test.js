@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
 
 const bootstrapEnvPath = require.resolve('../config/bootstrapEnv');
 
@@ -56,5 +57,27 @@ test('bootstrapEnvironment no modifica el entorno si no hay credenciales embebid
 
     assert.equal(result, null);
     assert.equal(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'C:\\existing-creds.json');
+  });
+});
+
+test('bootstrapEnvironment crea GOOGLE_APPLICATION_CREDENTIALS desde GOOGLE_CREDENTIALS_BASE64 cuando falta path', async () => {
+  delete require.cache[bootstrapEnvPath];
+  const { bootstrapEnvironment } = require('../config/bootstrapEnv');
+  const encoded = Buffer.from(JSON.stringify({ project_id: 'golden-city-prod', client_email: 'ocr@appgolden.test' }), 'utf8').toString('base64');
+
+  await withEnv({
+    GOOGLE_CREDENTIALS_BASE64: encoded,
+    GOOGLE_APPLICATION_CREDENTIALS: undefined,
+    NODE_ENV: 'test',
+  }, async () => {
+    const result = bootstrapEnvironment();
+
+    assert.equal(result, null);
+    assert.ok(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+    assert.equal(fs.existsSync(process.env.GOOGLE_APPLICATION_CREDENTIALS), true);
+
+    const savedJson = JSON.parse(fs.readFileSync(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'utf8'));
+    assert.equal(savedJson.project_id, 'golden-city-prod');
+    assert.equal(savedJson.client_email, 'ocr@appgolden.test');
   });
 });
