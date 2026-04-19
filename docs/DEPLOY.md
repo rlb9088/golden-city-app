@@ -117,10 +117,11 @@ La opción recomendada para este proyecto. El frontend Next.js se despliega en V
    R2_PUBLIC_URL=https://<r2-public-domain>
    GOOGLE_CREDENTIALS_BASE64=<service account JSON codificado en base64>
    ```
-3. Agregar al inicio de `backend/index.js` la decodificación de credenciales (antes de cualquier import que las use):
+3. El backend decodifica esas credenciales directamente en memoria al crear el cliente de Google Sheets. No se usan archivos locales ni `GOOGLE_APPLICATION_CREDENTIALS` en Railway.
    ```js
-   const { bootstrapEnvironment } = require('./config/bootstrapEnv');
-   bootstrapEnvironment();
+   const credentials = JSON.parse(
+     Buffer.from(process.env.GOOGLE_CREDENTIALS_BASE64, 'base64').toString('utf-8'),
+   );
    ```
 4. Verificar: `GET https://<railway-url>/api/health` → 200.
 5. Anotar la URL pública de Railway.
@@ -201,6 +202,6 @@ Keep these values outside the repo and outside the container image:
 - `JWT_SECRET`
 - `AUTH_BOOTSTRAP_ADMIN_PASSWORD`
 - `AUTH_BOOTSTRAP_AGENT_PASSWORD`
-- `GOOGLE_APPLICATION_CREDENTIALS`
+- `GOOGLE_CREDENTIALS_BASE64`
 
 On GCP, use Secret Manager or a mounted secret file for the service account JSON.

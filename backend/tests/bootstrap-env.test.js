@@ -1,8 +1,5 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
 const bootstrapEnvPath = require.resolve('../config/bootstrapEnv');
 
@@ -32,38 +29,32 @@ function withEnv(overrides, fn) {
     });
 }
 
-test('bootstrapGoogleCredentialsFromBase64 genera un archivo temporal reutilizable', async () => {
+test('bootstrapEnvironment no toca GOOGLE_APPLICATION_CREDENTIALS', async () => {
   delete require.cache[bootstrapEnvPath];
-  const { bootstrapGoogleCredentialsFromBase64 } = require('../config/bootstrapEnv');
-  const expectedPayload = JSON.stringify({ project_id: 'golden-city-prod' });
-  const encodedPayload = Buffer.from(expectedPayload, 'utf8').toString('base64');
-  const expectedPath = path.join(os.tmpdir(), 'appgolden-google-creds.json');
+  const { bootstrapEnvironment } = require('../config/bootstrapEnv');
 
   await withEnv({
-    GOOGLE_CREDENTIALS_BASE64: encodedPayload,
-    GOOGLE_APPLICATION_CREDENTIALS: undefined,
+    GOOGLE_CREDENTIALS_BASE64: Buffer.from(JSON.stringify({ project_id: 'golden-city-prod' }), 'utf8').toString('base64'),
+    GOOGLE_APPLICATION_CREDENTIALS: 'C:\\existing-creds.json',
   }, async () => {
-    const credentialsPath = bootstrapGoogleCredentialsFromBase64();
+    const result = bootstrapEnvironment();
 
-    assert.equal(credentialsPath, expectedPath);
-    assert.equal(process.env.GOOGLE_APPLICATION_CREDENTIALS, expectedPath);
-    assert.equal(fs.readFileSync(credentialsPath, 'utf8'), expectedPayload);
-
-    fs.unlinkSync(credentialsPath);
+    assert.equal(result, null);
+    assert.equal(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'C:\\existing-creds.json');
   });
 });
 
-test('bootstrapGoogleCredentialsFromBase64 no modifica el entorno si no hay credenciales embebidas', () => {
+test('bootstrapEnvironment no modifica el entorno si no hay credenciales embebidas', () => {
   delete require.cache[bootstrapEnvPath];
-  const { bootstrapGoogleCredentialsFromBase64 } = require('../config/bootstrapEnv');
+  const { bootstrapEnvironment } = require('../config/bootstrapEnv');
 
   return withEnv({
     GOOGLE_CREDENTIALS_BASE64: undefined,
     GOOGLE_APPLICATION_CREDENTIALS: 'C:\\existing-creds.json',
   }, async () => {
-    const credentialsPath = bootstrapGoogleCredentialsFromBase64();
+    const result = bootstrapEnvironment();
 
-    assert.equal(credentialsPath, null);
+    assert.equal(result, null);
     assert.equal(process.env.GOOGLE_APPLICATION_CREDENTIALS, 'C:\\existing-creds.json');
   });
 });

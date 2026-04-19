@@ -5,7 +5,41 @@ function normalizeBaseUrl(value, envName) {
     throw new Error(`Missing required env var ${envName}.`);
   }
 
-  return String(value).replace(/\/+$/, '');
+  const normalized = String(value).trim().replace(/\/+$/, '');
+  if (/^https?:\/\//i.test(normalized)) {
+    return normalized;
+  }
+
+  return `https://${normalized}`;
+}
+
+function collectAgentCredentials() {
+  const pairs = [];
+  const indexedKeys = [
+    ['PRODUCTION_AGENT1_USERNAME', 'PRODUCTION_AGENT1_PASSWORD'],
+    ['PRODUCTION_AGENT2_USERNAME', 'PRODUCTION_AGENT2_PASSWORD'],
+    ['PRODUCTION_AGENT3_USERNAME', 'PRODUCTION_AGENT3_PASSWORD'],
+  ];
+
+  for (const [usernameKey, passwordKey] of indexedKeys) {
+    if (process.env[usernameKey] && process.env[passwordKey]) {
+      pairs.push({
+        label: usernameKey.replace('PRODUCTION_', '').toLowerCase(),
+        username: process.env[usernameKey],
+        password: process.env[passwordKey],
+      });
+    }
+  }
+
+  if (process.env.PRODUCTION_AGENT_USERNAME && process.env.PRODUCTION_AGENT_PASSWORD) {
+    pairs.push({
+      label: 'agent',
+      username: process.env.PRODUCTION_AGENT_USERNAME,
+      password: process.env.PRODUCTION_AGENT_PASSWORD,
+    });
+  }
+
+  return pairs;
 }
 
 async function requestJson(url, { method = 'GET', headers = {}, body } = {}) {
@@ -54,8 +88,7 @@ async function main() {
   const frontendUrl = normalizeBaseUrl(process.env.PRODUCTION_FRONTEND_URL, 'PRODUCTION_FRONTEND_URL');
   const adminUsername = process.env.PRODUCTION_ADMIN_USERNAME || 'admin';
   const adminPassword = process.env.PRODUCTION_ADMIN_PASSWORD;
-  const agentUsername = process.env.PRODUCTION_AGENT_USERNAME;
-  const agentPassword = process.env.PRODUCTION_AGENT_PASSWORD;
+  const agentCredentials = collectAgentCredentials();
 
   const health = await requestJson(`${backendUrl}/api/health`);
   assertStatus(health.response, 200, 'GET /api/health', health.raw);
@@ -118,24 +151,26 @@ async function main() {
     logSkip('Admin login flow skipped because PRODUCTION_ADMIN_PASSWORD is not set');
   }
 
-  if (agentUsername && agentPassword) {
-    const agentLogin = await requestJson(`${backendUrl}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        username: agentUsername,
-        password: agentPassword,
-      }),
-    });
-    assertStatus(agentLogin.response, 200, 'POST /api/auth/login as agent', agentLogin.raw);
-    const agentAccessToken = agentLogin.json?.data?.accessToken;
-    const agentRefreshToken = agentLogin.json?.data?.refreshToken;
-    if (!agentAccessToken || !agentRefreshToken) {
-      throw new Error(`Agent login did not return access and refresh tokens: ${agentLogin.raw}`);
+  if (agentCredentials.length > 0) {
+    for (const agent of agentCredentials) {
+      const agentLogin = await requestJson(`${backendUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          username: agent.username,
+          password: agent.password,
+        }),
+      });
+      assertStatus(agentLogin.response, 200, `POST /api/auth/login as ${agent.label}`, agentLogin.raw);
+      const agentAccessToken = agentLogin.json?.data?.accessToken;
+      const agentRefreshToken = agentLogin.json?.data?.refreshToken;
+      if (!agentAccessToken || !agentRefreshToken) {
+        throw new Error(`${agent.label} login did not return access and refresh tokens: ${agentLogin.raw}`);
+      }
+      logPass(`${agent.label} login returns access + refresh tokens`);
     }
-    logPass('Agent login returns access + refresh tokens');
   } else {
-    logSkip('Agent login flow skipped because PRODUCTION_AGENT_USERNAME / PRODUCTION_AGENT_PASSWORD are not set');
+    logSkip('Agent login flow skipped because no PRODUCTION_AGENT credentials were provided');
   }
 
   const frontendLoginPage = await requestJson(frontendUrl);
