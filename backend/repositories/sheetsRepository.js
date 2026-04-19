@@ -1,4 +1,5 @@
 const { getSheetsClient, getSheetId } = require('../config/sheetsClient');
+const { SHEETS_SCHEMA_MAP } = require('../config/sheetsSchema');
 const {
   BadRequestError,
   ExternalServiceError,
@@ -16,6 +17,8 @@ const logger = require('../lib/logger');
 const memoryStore = {};
 const MAX_RETRIES = 3;
 const BASE_RETRY_DELAY_MS = 250;
+const MAX_BATCH_PAYLOAD_BYTES = 2 * 1024 * 1024;
+const BATCH_CHUNK_DELAY_MS = 100;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -35,6 +38,275 @@ function buildContext(sheetName, operation, extra = {}) {
     operation,
     ...extra,
   };
+}
+
+function getSheetHeaders(sheetName) {
+  return SHEETS_SCHEMA_MAP[sheetName] || null;
+}
+
+function toColumnLetter(columnNumber) {
+  let current = columnNumber;
+  let column = '';
+
+  while (current > 0) {
+    const remainder = (current - 1) % 26;
+    column = String.fromCharCode(65 + remainder) + column;
+    current = Math.floor((current - 1) / 26);
+  }
+
+  return column;
+}
+
+function isExactHeaderMatch(actualHeaders = [], expectedHeaders = []) {
+  return actualHeaders.length === expectedHeaders.length
+    && actualHeaders.every((header, index) => header === expectedHeaders[index]);
+}
+
+function isLegacyPagosHeaderWithoutBancoId(headers = []) {
+  return headers.length === 12
+    && headers[0] === 'id'
+    && headers[1] === 'estado'
+    && headers[2] === 'usuario'
+    && headers[3] === 'caja'
+    && headers[4] === 'banco'
+    && headers[5] === 'monto'
+    && headers[6] === 'tipo'
+    && headers[7] === 'comprobante_url'
+    && headers[8] === 'comprobante_file_id'
+    && headers[9] === 'fecha_comprobante'
+    && headers[10] === 'fecha_registro'
+    && headers[11] === 'agente';
+}
+
+function isLegacyPagosHeaderWithoutBancoIdAndReceiptFile(headers = []) {
+  return headers.length === 11
+    && headers[0] === 'id'
+    && headers[1] === 'estado'
+    && headers[2] === 'usuario'
+    && headers[3] === 'caja'
+    && headers[4] === 'banco'
+    && headers[5] === 'monto'
+    && headers[6] === 'tipo'
+    && headers[7] === 'comprobante_url'
+    && headers[8] === 'fecha_comprobante'
+    && headers[9] === 'fecha_registro'
+    && headers[10] === 'agente';
+}
+
+async function getTargetSheetId(sheets, spreadsheetId, sheetName) {
+  const spreadsheet = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets.properties(sheetId,title)',
+  });
+
+  const targetSheet = spreadsheet.data.sheets?.find((sheet) => sheet.properties?.title === sheetName);
+  return targetSheet?.properties?.sheetId ?? null;
+}
+
+async function ensureSheetSchema(sheets, spreadsheetId, sheetName, expectedHeaders, operation) {
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `${sheetName}!1:1`,
+    valueRenderOption: 'FORMATTED_VALUE',
+  });
+
+  const actualHeaders = response.data.values?.[0] || [];
+  if (isExactHeaderMatch(actualHeaders, expectedHeaders)) {
+    return;
+  }
+
+  if (
+    sheetName === 'pagos'
+    && (
+      isLegacyPagosHeaderWithoutBancoId(actualHeaders)
+      || isLegacyPagosHeaderWithoutBancoIdAndReceiptFile(actualHeaders)
+    )
+  ) {
+    logger.warn('Migrating legacy pagos schema to restore the expected headers', {
+      context: buildContext(sheetName, operation, {
+        schemaMigration: true,
+        fromHeaders: actualHeaders,
+        toHeaders: expectedHeaders,
+      }),
+    });
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${sheetName}!A1:${toColumnLetter(expectedHeaders.length)}1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [expectedHeaders] },
+    });
+
+    return;
+  }
+
+  if (actualHeaders.length === 0) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${sheetName}!A1:${String.fromCharCode(64 + expectedHeaders.length)}1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [expectedHeaders] },
+    });
+    return;
+  }
+
+  logger.warn('Google Sheets header mismatch detected', {
+    context: buildContext(sheetName, operation, {
+      expectedHeaders,
+      actualHeaders,
+    }),
+  });
+}
+
+function buildRowObject(row, headers) {
+  if (Array.isArray(row)) {
+    return headers.reduce((acc, header, index) => {
+      acc[header] = row[index] ?? '';
+      return acc;
+    }, {});
+  }
+
+  return { ...row };
+}
+
+function buildRowValues(row, headers) {
+  if (Array.isArray(row)) {
+    return row.map(normalizeSheetValue);
+  }
+
+  return headers.map((header) => normalizeSheetValue(row[header]));
+}
+
+function estimatePayloadBytes(rows) {
+  return Buffer.byteLength(JSON.stringify(rows), 'utf8');
+}
+
+function chunkRowsBySize(rows, maxBytes) {
+  const chunks = [];
+  let currentChunk = [];
+  let currentBytes = 2; // account for array brackets in JSON.stringify
+
+  for (const row of rows) {
+    const rowBytes = Buffer.byteLength(JSON.stringify(row), 'utf8') + 1;
+    const wouldExceedLimit = currentChunk.length > 0 && (currentBytes + rowBytes) > maxBytes;
+
+    if (wouldExceedLimit) {
+      chunks.push(currentChunk);
+      currentChunk = [row];
+      currentBytes = 2 + rowBytes;
+      continue;
+    }
+
+    currentChunk.push(row);
+    currentBytes += rowBytes;
+  }
+
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk);
+  }
+
+  return chunks;
+}
+
+function parseUpdatedRange(updatedRange) {
+  const rangeText = String(updatedRange ?? '');
+  const rowMatches = [...rangeText.matchAll(/(\d+)/g)].map((match) => Number(match[1]));
+
+  if (rowMatches.length === 0) {
+    return { startRow: null, endRow: null };
+  }
+
+  if (rowMatches.length === 1) {
+    return { startRow: rowMatches[0], endRow: rowMatches[0] };
+  }
+
+  return {
+    startRow: rowMatches[0],
+    endRow: rowMatches[rowMatches.length - 1],
+  };
+}
+
+async function delay(ms) {
+  await sleep(ms);
+}
+
+async function appendChunkWithRetry(sheets, spreadsheetId, sheetName, chunk, operationContext) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt += 1) {
+    try {
+      return await sheets.spreadsheets.values.append({
+        spreadsheetId,
+        range: `${sheetName}!A:Z`,
+        valueInputOption: 'RAW',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: { values: chunk },
+      });
+    } catch (error) {
+      lastError = error;
+      const isLastAttempt = attempt === MAX_RETRIES;
+
+      if (isRetryableError(error) && !isLastAttempt) {
+        const delayMs = BASE_RETRY_DELAY_MS * (2 ** (attempt - 1));
+        logger.warn('Retrying Google Sheets batch chunk', {
+          context: buildContext(sheetName, 'appendBatch', {
+            ...operationContext,
+            attempt,
+            delayMs,
+          }),
+          error,
+        });
+        await delay(delayMs);
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw lastError;
+}
+
+async function rollbackAppendedChunks(sheets, spreadsheetId, sheetName, sheetId, appendedRanges) {
+  if (!appendedRanges.length) {
+    return;
+  }
+
+  const requests = [];
+
+  for (const range of [...appendedRanges].reverse()) {
+    const { startRow, endRow } = parseUpdatedRange(range?.updatedRange);
+
+    if (!Number.isInteger(startRow) || !Number.isInteger(endRow)) {
+      continue;
+    }
+
+    requests.push({
+      deleteDimension: {
+        range: {
+          sheetId,
+          dimension: 'ROWS',
+          startIndex: startRow - 1,
+          endIndex: endRow,
+        },
+      },
+    });
+  }
+
+  if (!requests.length) {
+    return;
+  }
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: { requests },
+  });
+
+  logger.warn('Rolled back partial Google Sheets batch append', {
+    context: buildContext(sheetName, 'appendBatch', {
+      rolledBackChunks: appendedRanges.length,
+    }),
+  });
 }
 
 function getStatusCode(error) {
@@ -182,6 +454,7 @@ async function append(sheetName, data, headers) {
       return { status: 'success', mode: 'memory' };
     }
 
+    await ensureSheetSchema(sheets, spreadsheetId, sheetName, headers, 'append');
     const row = headers.map((h) => normalizeSheetValue(data[h]));
 
     await sheets.spreadsheets.values.append({
@@ -194,6 +467,112 @@ async function append(sheetName, data, headers) {
 
     return { status: 'success', mode: 'sheets' };
   });
+}
+
+/**
+ * Agrega múltiples filas al final de la hoja.
+ * @param {string} sheetName
+ * @param {Array<object|Array>} rows
+ */
+async function appendBatch(sheetName, rows) {
+  if (!Array.isArray(rows)) {
+    throw new BadRequestError('Las filas a insertar deben ser un array.', {
+      context: buildContext(sheetName, 'appendBatch'),
+    });
+  }
+
+  const headers = getSheetHeaders(sheetName);
+  if (!headers) {
+    throw new BadRequestError('La hoja solicitada no existe o no tiene schema configurado.', {
+      context: buildContext(sheetName, 'appendBatch'),
+    });
+  }
+
+  const normalizedRows = rows.map((row) => buildRowValues(row, headers));
+  const payloadBytes = estimatePayloadBytes(normalizedRows);
+
+  let sheets;
+  try {
+    sheets = await getSheetsClient();
+  } catch (error) {
+    throw normalizeRepositoryError(error, sheetName, 'appendBatch');
+  }
+
+  if (!sheets) {
+    if (!memoryStore[sheetName]) memoryStore[sheetName] = [];
+    for (const row of rows) {
+      memoryStore[sheetName].push(buildRowObject(row, headers));
+    }
+    return { status: 'success', mode: 'memory', chunks: 1, payloadBytes };
+  }
+
+  const spreadsheetId = getSheetId();
+  const shouldChunk = payloadBytes > MAX_BATCH_PAYLOAD_BYTES;
+  const chunks = shouldChunk ? chunkRowsBySize(normalizedRows, MAX_BATCH_PAYLOAD_BYTES) : [normalizedRows];
+  const successfulChunks = [];
+  let sheetId = null;
+
+  try {
+    if (shouldChunk) {
+      const spreadsheet = await sheets.spreadsheets.get({
+        spreadsheetId,
+        fields: 'sheets.properties(sheetId,title)',
+      });
+
+      const targetSheet = spreadsheet.data.sheets?.find((sheet) => sheet.properties?.title === sheetName);
+      sheetId = targetSheet?.properties?.sheetId;
+
+      if (sheetId === undefined || sheetId === null) {
+        throw new NotFoundError('No se encontró la hoja solicitada en Google Sheets.', {
+          context: buildContext(sheetName, 'appendBatch'),
+        });
+      }
+    }
+
+    for (const [chunkIndex, chunk] of chunks.entries()) {
+      const response = await appendChunkWithRetry(sheets, spreadsheetId, sheetName, chunk, {
+        chunkIndex: chunkIndex + 1,
+        chunkCount: chunks.length,
+        chunkRows: chunk.length,
+      });
+
+      const parsedRange = parseUpdatedRange(response?.data?.updates?.updatedRange);
+      successfulChunks.push({
+        updatedRange: response?.data?.updates?.updatedRange,
+        ...parsedRange,
+      });
+
+      if (chunkIndex < chunks.length - 1) {
+        await delay(BATCH_CHUNK_DELAY_MS);
+      }
+    }
+
+    return {
+      status: 'success',
+      mode: 'sheets',
+      chunks: chunks.length,
+      payloadBytes,
+    };
+  } catch (error) {
+    if (shouldChunk && sheetId !== null) {
+      try {
+        await rollbackAppendedChunks(sheets, spreadsheetId, sheetName, sheetId, successfulChunks);
+      } catch (rollbackError) {
+        throw normalizeRepositoryError(rollbackError, sheetName, 'appendBatch', {
+          chunks: successfulChunks.length,
+          payloadBytes,
+          rollbackFailed: true,
+        });
+      }
+    }
+
+    throw normalizeRepositoryError(error, sheetName, 'appendBatch', {
+      chunks: chunks.length,
+      successfulChunks: successfulChunks.length,
+      payloadBytes,
+      chunked: shouldChunk,
+    });
+  }
 }
 
 /**
@@ -223,6 +602,7 @@ async function update(sheetName, rowIndex, data, headers) {
       });
     }
 
+    await ensureSheetSchema(sheets, spreadsheetId, sheetName, headers, 'update');
     const row = headers.map((h) => normalizeSheetValue(data[h]));
 
     await sheets.spreadsheets.values.update({
@@ -311,4 +691,4 @@ async function findByColumn(sheetName, column, value) {
   return all.filter((row) => row[column] === value);
 }
 
-module.exports = { getAll, append, update, deleteRow, findByColumn };
+module.exports = { getAll, append, appendBatch, update, deleteRow, findByColumn };

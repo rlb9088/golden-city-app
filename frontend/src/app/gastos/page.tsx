@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState, useRef } from 'react';
-import { getConfig, createGasto, getGastos, updateGasto, cancelGasto, type GastoRecord } from '@/lib/api';
+import { getConfig, createGasto, getGastos, getScopedBancos, updateGasto, cancelGasto, type ConfigBanco, type GastoRecord } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { formatCurrency, formatDate, getTodayLima } from '@/lib/format';
 import AlertBanner from '@/components/AlertBanner';
@@ -16,8 +16,9 @@ function isAnulado(record: GastoRecord) {
 const PAGE_SIZE = 50;
 
 export default function GastosPage() {
-  const { isAdmin } = useAuth();
-  const [config, setConfig] = useState<{ bancos: string[]; categorias: Record<string, string[]> } | null>(null);
+  const { isAdmin, user } = useAuth();
+  const [config, setConfig] = useState<{ bancos: string[]; bancos_full: ConfigBanco[]; categorias: Record<string, string[]> } | null>(null);
+  const [scopedBancos, setScopedBancos] = useState<ConfigBanco[]>([]);
   const [gastos, setGastos] = useState<GastoRecord[]>([]);
   const [pagination, setPagination] = useState({ limit: PAGE_SIZE, offset: 0, total: 0, hasMore: false });
   const [loading, setLoading] = useState(true);
@@ -64,7 +65,7 @@ export default function GastosPage() {
       concepto: gasto.concepto || '',
       categoria: gasto.categoria || '',
       subcategoria: gasto.subcategoria || '',
-      banco: gasto.banco || '',
+      banco: gasto.banco_id || '',
       monto: String(gasto.monto ?? ''),
       fecha_gasto: gasto.fecha_gasto || '',
     });
@@ -100,7 +101,7 @@ export default function GastosPage() {
         concepto: editForm.concepto.trim(),
         categoria: editForm.categoria.trim(),
         subcategoria: editForm.subcategoria.trim(),
-        banco: editForm.banco.trim(),
+        banco_id: editForm.banco.trim(),
         monto: parsedMonto,
         fecha_gasto: editForm.fecha_gasto.trim(),
       });
@@ -146,7 +147,9 @@ export default function GastosPage() {
         const defaultCategoria = Object.keys(configRes.categorias)[0] || '';
         setCategoria((current) => current || defaultCategoria);
         setSubcategoria((current) => current || (configRes.categorias[defaultCategoria]?.[0] || ''));
-        setBanco((current) => current || configRes.bancos[0] || '');
+        const scopedResponse = await getScopedBancos(user?.id);
+        setScopedBancos(scopedResponse.data);
+        setBanco(scopedResponse.data[0]?.id || '');
       } catch (err) {
         setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar datos' });
       } finally {
@@ -155,7 +158,7 @@ export default function GastosPage() {
     };
 
     void loadData();
-  }, [loadGastosPage]);
+  }, [loadGastosPage, user?.id]);
 
   const handlePreviousPage = useCallback(() => {
     if (pagination.offset === 0 || loading) {
@@ -187,13 +190,13 @@ export default function GastosPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!concepto.trim() || !monto || parseFloat(monto) <= 0) {
-      setAlert({ type: 'error', message: 'Completa concepto y monto válido' });
+    if (!concepto.trim() || !banco.trim() || !scopedBancos.length || !monto || parseFloat(monto) <= 0) {
+      setAlert({ type: 'error', message: 'Completa concepto, banco y monto válido' });
       return;
     }
     try {
       setSubmitting(true);
-      const response = await createGasto({ concepto: concepto.trim(), categoria, subcategoria, banco, monto: parseFloat(monto), fecha_gasto: fechaGasto });
+      const response = await createGasto({ concepto: concepto.trim(), categoria, subcategoria, banco_id: banco, monto: parseFloat(monto), fecha_gasto: fechaGasto });
       const warningMessage = response.warnings?.length
         ? `Gasto registrado con observaciones: ${response.warnings.join(' • ')}`
         : '';
@@ -292,8 +295,12 @@ export default function GastosPage() {
           </div>
           <div className="field-group">
             <label className="label" htmlFor="banco-gasto">Banco</label>
-            <select className="select" id="banco-gasto" value={banco} onChange={(e) => setBanco(e.target.value)}>
-              {config.bancos.map((b) => <option key={b} value={b}>{b}</option>)}
+            <select className="select" id="banco-gasto" value={banco} onChange={(e) => setBanco(e.target.value)} disabled={scopedBancos.length === 0}>
+              {scopedBancos.length === 0 ? (
+                <option value="">No hay bancos disponibles</option>
+              ) : (
+                scopedBancos.map((b) => <option key={b.id} value={b.id}>{b.nombre}</option>)
+              )}
             </select>
           </div>
           <div className="field-group">
@@ -391,8 +398,12 @@ export default function GastosPage() {
                 </label>
                 <label className="field-group">
                   <span className="label">Banco</span>
-                  <select className="select" value={editForm.banco} onChange={(e) => setEditForm((current) => ({ ...current, banco: e.target.value }))} required>
-                    {config.bancos.map((option) => <option key={option} value={option}>{option}</option>)}
+                  <select className="select" value={editForm.banco} onChange={(e) => setEditForm((current) => ({ ...current, banco: e.target.value }))} required disabled={scopedBancos.length === 0}>
+                    {scopedBancos.length === 0 ? (
+                      <option value="">No hay bancos disponibles</option>
+                    ) : (
+                      scopedBancos.map((option) => <option key={option.id} value={option.id}>{option.nombre}</option>)
+                    )}
                   </select>
                 </label>
                 <label className="field-group">

@@ -6,6 +6,7 @@ const { verifyToken, requireAuth, requireAdmin } = require('../middleware/auth.m
 const { bancoSchema } = require('../schemas/bancos.schema');
 
 router.post('/', verifyToken, requireAdmin, validate(bancoSchema), controller.create);
-router.get('/', verifyToken, requireAuth, controller.getAll);
+router.get('/scoped', verifyToken, requireAuth, controller.getScoped);
+router.get('/', verifyToken, requireAuth, controller.getPagedAndFiltered);
 
 module.exports = router;

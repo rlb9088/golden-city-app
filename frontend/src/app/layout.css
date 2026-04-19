@@ -22,6 +22,8 @@
   background: rgba(5, 5, 10, 0.68);
   backdrop-filter: blur(2px);
   z-index: 90;
+  pointer-events: none;
+  opacity: 0;
 }
 
 /* Mobile */
@@ -64,5 +66,7 @@
 
   .sidebar-backdrop {
     display: block;
+    pointer-events: auto;
+    opacity: 1;
   }
 }

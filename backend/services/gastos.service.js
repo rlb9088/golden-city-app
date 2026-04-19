@@ -1,12 +1,12 @@
 const repo = require('../repositories/sheetsRepository');
 const audit = require('./audit.service');
 const { nowLima } = require('../config/timezone');
-const { validateReferences } = require('./config.service');
-const { BadRequestError, NotFoundError } = require('../utils/appError');
+const { validateReferences, getConfigBancoById } = require('./config.service');
+const { BadRequestError, ForbiddenError, NotFoundError } = require('../utils/appError');
 const { paginateItems } = require('../utils/pagination');
 
 const SHEET_NAME = 'gastos';
-const HEADERS = ['id', 'estado', 'fecha_gasto', 'fecha_registro', 'concepto', 'categoria', 'subcategoria', 'banco', 'monto'];
+const HEADERS = ['id', 'estado', 'fecha_gasto', 'fecha_registro', 'concepto', 'categoria', 'subcategoria', 'banco_id', 'banco', 'monto'];
 
 let gastoCounter = 1;
 
@@ -14,9 +14,129 @@ function normalizeText(value) {
   return String(value ?? '').trim().toLowerCase();
 }
 
+function normalizeId(value) {
+  return String(value ?? '').trim();
+}
+
+function getAuthLabel(caller = {}) {
+  if (typeof caller === 'string') {
+    return caller;
+  }
+
+  return caller?.user || caller?.nombre || caller?.username || caller?.userId || 'system';
+}
+
+async function resolveBancoDetails(bancoId) {
+  const banco = await getConfigBancoById(bancoId);
+  if (!banco) {
+    return {
+      banco_id: String(bancoId ?? '').trim(),
+      banco: '',
+      propietario_id: '',
+    };
+  }
+
+  return {
+    banco_id: banco.id,
+    banco: banco.nombre,
+    propietario_id: banco.propietario_id || '',
+  };
+}
+
+function getOwnerId(caller = {}) {
+  if (typeof caller === 'string') {
+    return normalizeId(caller);
+  }
+
+  return normalizeId(caller?.userId);
+}
+
+async function assertBancoOwnershipForCaller(bancoId, caller) {
+  const bancoDetails = await resolveBancoDetails(bancoId);
+  const bancoOwnerId = normalizeId(bancoDetails.propietario_id);
+  const ownerId = getOwnerId(caller);
+
+  if (!ownerId) {
+    throw new ForbiddenError('No se pudo resolver el usuario autenticado.', {
+      context: { component: 'gastos.owner-check' },
+    });
+  }
+
+  if (!bancoOwnerId || bancoOwnerId !== ownerId) {
+    throw new ForbiddenError('El banco no pertenece al administrador autenticado.', {
+      context: {
+        banco_id: bancoDetails.banco_id,
+        banco_owner_id: bancoOwnerId,
+        owner_user_id: ownerId,
+      },
+    });
+  }
+
+  return bancoDetails;
+}
+
 function normalizeEstado(value) {
   const estado = normalizeText(value);
   return estado || 'activo';
+}
+
+function normalizeDateOnly(value) {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+
+  const isoMatch = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoMatch) return isoMatch[1];
+
+  const localMatch = text.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (localMatch) {
+    return `${localMatch[3]}-${localMatch[2]}-${localMatch[1]}`;
+  }
+
+  return '';
+}
+
+function normalizeFilters(filters = {}) {
+  const desde = normalizeDateOnly(filters.desde);
+  const hasta = normalizeDateOnly(filters.hasta);
+  const categoria = normalizeText(filters.categoria);
+
+  if (desde && hasta && desde > hasta) {
+    return {
+      categoria,
+      desde: hasta,
+      hasta: desde,
+    };
+  }
+
+  return {
+    categoria,
+    desde,
+    hasta,
+  };
+}
+
+function matchesDateRange(rowDate, desde, hasta) {
+  if (!desde && !hasta) return true;
+  if (!rowDate) return false;
+  if (desde && rowDate < desde) return false;
+  if (hasta && rowDate > hasta) return false;
+  return true;
+}
+
+function matchesExactField(value, filterValue) {
+  if (!filterValue) return true;
+  return normalizeText(value) === filterValue;
+}
+
+function filterGastos(gastos, filters = {}) {
+  const normalized = normalizeFilters(filters);
+
+  return gastos.filter((gasto) => {
+    const rowDate = normalizeDateOnly(gasto.fecha_gasto || gasto.fecha_registro);
+
+    return matchesDateRange(rowDate, normalized.desde, normalized.hasta)
+      && matchesExactField(gasto.categoria, normalized.categoria);
+  });
 }
 
 function stripInternalFields(record) {
@@ -28,7 +148,7 @@ function isActivo(record) {
   return normalizeEstado(record.estado) !== 'anulado';
 }
 
-async function create(data, adminUser) {
+async function create(data, caller) {
   const warnings = await validateReferences([
     {
       tableName: 'categorias',
@@ -50,12 +170,14 @@ async function create(data, adminUser) {
     },
     {
       tableName: 'bancos',
-      field: 'nombre',
+      field: 'id',
       label: 'banco',
       tableLabel: 'config_bancos',
-      value: data.banco,
+      value: data.banco_id,
     },
-  ], adminUser, 'gasto');
+  ], getAuthLabel(caller), 'gasto');
+
+  const bancoDetails = await assertBancoOwnershipForCaller(data.banco_id, caller);
 
   const gasto = {
     id: `GAS-${Date.now()}-${gastoCounter++}`,
@@ -65,12 +187,13 @@ async function create(data, adminUser) {
     concepto: data.concepto,
     categoria: data.categoria,
     subcategoria: data.subcategoria || '',
-    banco: data.banco,
+    banco_id: bancoDetails.banco_id,
+    banco: bancoDetails.banco,
     monto: data.monto,
   };
 
   await repo.append(SHEET_NAME, gasto, HEADERS);
-  await audit.log('create', 'gasto', adminUser, gasto);
+  await audit.log('create', 'gasto', getAuthLabel(caller), gasto);
 
   return { record: gasto, warnings };
 }
@@ -83,9 +206,14 @@ function sortGastosForList(gastos) {
   return [...gastos].reverse();
 }
 
-async function getPaged(limit, offset) {
+async function getPagedAndFiltered(filters = {}, limit, offset) {
   const gastos = await getAll();
-  return paginateItems(sortGastosForList(gastos), limit, offset);
+  const filtered = filterGastos(gastos, filters);
+  return paginateItems(sortGastosForList(filtered), limit, offset);
+}
+
+async function getPaged(limit, offset, filters = {}) {
+  return getPagedAndFiltered(filters, limit, offset);
 }
 
 function buildUpdatedGasto(existing, updates) {
@@ -96,7 +224,7 @@ function buildUpdatedGasto(existing, updates) {
   };
 }
 
-async function update(id, updates, user) {
+async function update(id, updates, caller) {
   const gastos = await getAll();
   const existing = gastos.find((gasto) => gasto.id === id);
 
@@ -109,19 +237,44 @@ async function update(id, updates, user) {
     });
   }
 
-  const nextRecord = buildUpdatedGasto(existing, updates);
+  const nextBancoReference = Object.prototype.hasOwnProperty.call(updates, 'banco_id')
+    ? updates.banco_id
+    : existing.banco_id;
+
+  if (Object.prototype.hasOwnProperty.call(updates, 'banco_id')) {
+    await validateReferences([
+      {
+        tableName: 'bancos',
+        field: 'id',
+        label: 'banco',
+        tableLabel: 'config_bancos',
+        value: updates.banco_id,
+      },
+    ], getAuthLabel(caller), 'gasto');
+  }
+
+  const bancoDetails = await assertBancoOwnershipForCaller(nextBancoReference, caller);
+
+  let nextRecord = buildUpdatedGasto(existing, updates);
+  nextRecord = {
+    ...nextRecord,
+    banco_id: bancoDetails.banco_id,
+    banco: bancoDetails.banco,
+  };
 
   await repo.update(SHEET_NAME, existing._rowIndex, nextRecord, HEADERS);
-  await audit.log('update', 'gasto', user, {
+  await audit.log('update', 'gasto', getAuthLabel(caller), {
     before: stripInternalFields(existing),
     after: stripInternalFields(nextRecord),
-    changes: updates,
+    changes: Object.prototype.hasOwnProperty.call(updates, 'banco_id')
+      ? { ...updates, banco: nextRecord.banco }
+      : updates,
   });
 
   return nextRecord;
 }
 
-async function cancel(id, motivo, user) {
+async function cancel(id, motivo, caller) {
   const gastos = await getAll();
   const existing = gastos.find((gasto) => gasto.id === id);
 
@@ -149,7 +302,7 @@ async function cancel(id, motivo, user) {
   };
 
   await repo.update(SHEET_NAME, existing._rowIndex, nextRecord, HEADERS);
-  await audit.log('delete', 'gasto', user, {
+  await audit.log('delete', 'gasto', getAuthLabel(caller), {
     before: stripInternalFields(existing),
     after: stripInternalFields(nextRecord),
     motivo,
@@ -158,4 +311,11 @@ async function cancel(id, motivo, user) {
   return nextRecord;
 }
 
-module.exports = { create, getAll, getPaged, update, cancel };
+module.exports = {
+  create,
+  getAll,
+  getPaged,
+  getPagedAndFiltered,
+  update,
+  cancel,
+};

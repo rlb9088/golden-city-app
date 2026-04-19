@@ -11,6 +11,21 @@ export interface AuthUser {
   nombre: string;
 }
 
+export interface ConfigAgent {
+  id: string;
+  nombre: string;
+  username: string;
+  role: string;
+  activo: boolean;
+}
+
+export interface ConfigBanco {
+  id: string;
+  nombre: string;
+  propietario?: string;
+  propietario_id?: string;
+}
+
 export interface StoredAuthSession {
   accessToken: string;
   refreshToken: string;
@@ -46,10 +61,12 @@ export interface PagoRecord {
   estado?: string;
   usuario: string;
   caja: string;
+  banco_id: string;
   banco: string;
   monto: string | number;
   tipo: string;
   comprobante_url?: string;
+  comprobante_file_id?: string;
   fecha_comprobante?: string;
   fecha_registro?: string;
   agente?: string;
@@ -59,6 +76,7 @@ export interface IngresoRecord {
   id: string;
   estado?: string;
   agente: string;
+  banco_id: string;
   banco: string;
   monto: string | number;
   fecha_movimiento: string;
@@ -71,10 +89,20 @@ export interface GastoRecord {
   concepto: string;
   categoria: string;
   subcategoria?: string;
+  banco_id: string;
   banco: string;
   monto: string | number;
   fecha_gasto: string;
   fecha_registro?: string;
+}
+
+export interface BancoRecord {
+  id: string;
+  fecha: string;
+  banco_id: string;
+  banco: string;
+  saldo: string | number;
+  propietario_id?: string;
 }
 
 export interface AuditRecord {
@@ -246,7 +274,7 @@ export async function refreshStoredSession() {
   return refreshPromise;
 }
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(endpoint: string, options: RequestInit = {}, allowRefresh = true): Promise<T> {
   let lastError: unknown;
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -256,9 +284,14 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
       lastError = error;
 
       if (error instanceof ApiError && error.kind === 'http' && error.status === 401) {
+        if (!allowRefresh) {
+          notifyAuthInvalid();
+          throw error;
+        }
+
         const refreshedSession = await refreshStoredSession();
         if (refreshedSession?.accessToken) {
-          continue;
+          return request<T>(endpoint, options, false);
         }
 
         notifyAuthInvalid();
@@ -352,7 +385,9 @@ export async function fetchCurrentSession() {
 
 // Config General
 export async function getConfig() {
-  return request<{
+  const response = await request<{
+    status: string;
+  data: {
     bancos: string[];
     agentes: string[];
     usuarios: string[];
@@ -360,13 +395,16 @@ export async function getConfig() {
     tipos_pago: string[];
     cajas: string[];
     // Full config structure matching backend
-    agentes_full: Record<string, string>[];
-    bancos_full: Record<string, string>[];
+    agentes_full: ConfigAgent[];
+    bancos_full: ConfigBanco[];
     cajas_full: Record<string, string>[];
     categorias_full: Record<string, string>[];
     usuarios_full: Record<string, string>[];
     tipos_pago_full: Record<string, string>[];
+    };
   }>('/api/config');
+
+  return response.data;
 }
 
 // Config CRUD
@@ -374,9 +412,16 @@ export async function getTableData(table: string) {
   return request<{ status: string; data: Record<string, string>[] }>(`/api/config/${table}`);
 }
 
-export async function addTableRow(table: string, data: Record<string, string>) {
+export async function addTableRow(table: string, data: Record<string, unknown>) {
   return request<{ status: string; data: Record<string, string> }>(`/api/config/${table}`, {
     method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateTableRow(table: string, id: string, data: Record<string, unknown>) {
+  return request<{ status: string; data: Record<string, string> }>(`/api/config/${table}/${encodeURIComponent(id)}`, {
+    method: 'PUT',
     body: JSON.stringify(data),
   });
 }
@@ -387,10 +432,17 @@ export async function removeTableRow(table: string, id: string) {
   });
 }
 
-export async function importTableBatch(table: string, items: Record<string, string>[]) {
+export async function importTableBatch(table: string, items: Record<string, unknown>[]) {
   return request<{ status: string; data: Record<string, string>[]; count: number }>(`/api/config/${table}/import`, {
     method: 'POST',
     body: JSON.stringify({ items }),
+  });
+}
+
+export async function changeAgentPassword(id: string, password: string) {
+  return request<{ status: string; data: Record<string, string> }>(`/api/config/agentes/${encodeURIComponent(id)}/password`, {
+    method: 'PUT',
+    body: JSON.stringify({ password }),
   });
 }
 
@@ -398,10 +450,12 @@ export async function importTableBatch(table: string, items: Record<string, stri
 export async function createPago(data: {
   usuario: string;
   caja: string;
-  banco: string;
+  banco_id: string;
+  agente_id?: string;
   monto: number;
   tipo: string;
   comprobante_url?: string;
+  comprobante_base64?: string;
   fecha_comprobante?: string;
   }) {
     return request<MutationResponse<Record<string, string>>>('/api/pagos', {
@@ -413,10 +467,11 @@ export async function createPago(data: {
 export async function updatePago(id: string, data: {
   usuario?: string;
   caja?: string;
-  banco?: string;
+  banco_id: string;
   monto?: number;
   tipo?: string;
   comprobante_url?: string;
+  comprobante_file_id?: string;
   fecha_comprobante?: string;
 }) {
   return request<{ status: string; data: PagoRecord }>(`/api/pagos/${encodeURIComponent(id)}`, {
@@ -457,7 +512,7 @@ export async function getPagos(filters: PagosFilters = {}) {
 }
 
 // Ingresos
-export async function createIngreso(data: { agente: string; banco: string; monto: number; fecha_movimiento: string }) {
+export async function createIngreso(data: { agente: string; banco_id: string; monto: number; fecha_movimiento: string }) {
   return request<MutationResponse<Record<string, string>>>('/api/ingresos', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -486,7 +541,7 @@ export async function getIngresos(filters: IngresosFilters = {}) {
 
 export async function updateIngreso(id: string, data: {
   agente?: string;
-  banco?: string;
+  banco_id: string;
   monto?: number;
   fecha_movimiento?: string;
 }) {
@@ -508,7 +563,7 @@ export async function createGasto(data: {
   concepto: string;
   categoria: string;
   subcategoria?: string;
-  banco: string;
+  banco_id: string;
   monto: number;
   fecha_gasto: string;
 }) {
@@ -541,7 +596,7 @@ export async function updateGasto(id: string, data: {
   concepto?: string;
   categoria?: string;
   subcategoria?: string;
-  banco?: string;
+  banco_id: string;
   monto?: number;
   fecha_gasto?: string;
 }) {
@@ -559,15 +614,42 @@ export async function cancelGasto(id: string, motivo: string) {
 }
 
 // Bancos
-export async function createBanco(data: { banco: string; saldo: number; fecha: string }) {
-  return request<{ status: string; data: Record<string, string>; overwritten?: boolean }>('/api/bancos', {
+export async function createBanco(data: { banco_id: string; saldo: number; fecha: string }) {
+  return request<{ status: string; data: BancoRecord & { overwritten?: boolean; warnings?: string[] }; overwritten?: boolean }>('/api/bancos', {
     method: 'POST',
     body: JSON.stringify(data),
   });
 }
 
-export async function getBancos() {
-  return request<{ status: string; data: Record<string, string>[] }>('/api/bancos');
+export interface BancosFilters {
+  agente?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export async function getBancos(filters: BancosFilters = {}) {
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      params.set(key, String(value));
+    }
+  });
+
+  const query = params.toString();
+  const suffix = query ? `?${query}` : '';
+  return request<{ status: string; data: PaginatedResponse<BancoRecord> }>(`/api/bancos${suffix}`);
+}
+
+export async function getScopedBancos(agenteId?: string) {
+  const params = new URLSearchParams();
+  if (agenteId && String(agenteId).trim()) {
+    params.set('agente_id', String(agenteId));
+  }
+
+  const query = params.toString();
+  const suffix = query ? `?${query}` : '';
+  return request<{ status: string; data: ConfigBanco[] }>(`/api/bancos/scoped${suffix}`);
 }
 
 export interface AuditFilters {

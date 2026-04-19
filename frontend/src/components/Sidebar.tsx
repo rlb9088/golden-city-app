@@ -75,7 +75,7 @@ export default function Sidebar({ isMobileOpen, onMobileOpenChange }: SidebarPro
         <div className="sidebar-user-config">
           <div className="sidebar-field">
             <span className="sidebar-label">Sesión activa</span>
-            <span className="sidebar-user-name">{user || 'Usuario'}</span>
+            <span className="sidebar-user-name">{user?.nombre || user?.username || 'Usuario'}</span>
           </div>
           <div className="sidebar-role-badge">
             <span className={`badge ${isAdmin ? 'badge-gold' : 'badge-blue'}`}>

@@ -4,7 +4,8 @@ const gastoSchema = z.object({
   concepto: z.string().min(1, 'Concepto es requerido'),
   categoria: z.string().min(1, 'Categoría es requerida'),
   subcategoria: z.string().optional().default(''),
-  banco: z.string().min(1, 'Banco es requerido'),
+  banco_id: z.string().min(1, 'Banco es requerido'),
+  banco: z.string().optional().default(''),
   monto: z.number().positive('Monto debe ser mayor a 0'),
   fecha_gasto: z.string().min(1, 'Fecha del gasto es requerida'),
 });
@@ -13,7 +14,8 @@ const gastoUpdateSchema = z.object({
   concepto: z.string().min(1, 'Concepto es requerido').optional(),
   categoria: z.string().min(1, 'Categoría es requerida').optional(),
   subcategoria: z.string().optional(),
-  banco: z.string().min(1, 'Banco es requerido').optional(),
+  banco_id: z.string().min(1, 'Banco es requerido'),
+  banco: z.string().optional().default(''),
   monto: z.number().positive('Monto debe ser mayor a 0').optional(),
   fecha_gasto: z.string().min(1, 'Fecha del gasto es requerida').optional(),
 }).refine((data) => Object.values(data).some((value) => value !== undefined), {

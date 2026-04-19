@@ -1,17 +1,22 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { getConfig, createBanco, getBancos } from '@/lib/api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { getConfig, createBanco, getBancos, getScopedBancos, type BancoRecord, type ConfigBanco } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { formatCurrency, formatDate, getTodayLima } from '@/lib/format';
 import AlertBanner from '@/components/AlertBanner';
+import PaginationControls from '@/components/PaginationControls';
 import TableSkeleton from '@/components/TableSkeleton';
 import './bancos.css';
 
+const PAGE_SIZE = 50;
+
 export default function BancosPage() {
-  const { isAdmin } = useAuth();
-  const [config, setConfig] = useState<{ bancos: string[] } | null>(null);
-  const [bancos, setBancos] = useState<Record<string, string>[]>([]);
+  const { isAdmin, user } = useAuth();
+  const [config, setConfig] = useState<{ bancos: string[]; bancos_full: ConfigBanco[] } | null>(null);
+  const [scopedBancos, setScopedBancos] = useState<ConfigBanco[]>([]);
+  const [bancos, setBancos] = useState<BancoRecord[]>([]);
+  const [pagination, setPagination] = useState({ limit: PAGE_SIZE, offset: 0, total: 0, hasMore: false });
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [alert, setAlert] = useState<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null);
@@ -19,15 +24,31 @@ export default function BancosPage() {
   const [banco, setBancoSelect] = useState('');
   const [saldo, setSaldo] = useState('');
   const [fecha, setFecha] = useState(getTodayLima());
+  const currentPageRef = useRef(0);
+
+  const loadBancosPage = useCallback(async (page: number) => {
+    const safePage = Math.max(page, 0);
+    const res = await getBancos({ limit: PAGE_SIZE, offset: safePage * PAGE_SIZE });
+    setBancos(res.data.items);
+    setPagination(res.data.pagination);
+    currentPageRef.current = safePage;
+    return res.data;
+  }, []);
+
+  const refreshBancos = useCallback(async () => {
+    await loadBancosPage(currentPageRef.current);
+  }, [loadBancosPage]);
 
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true);
-        const [configRes, bancosRes] = await Promise.all([getConfig(), getBancos()]);
+        const [configRes, bancosRes] = await Promise.all([getConfig(), loadBancosPage(0)]);
         setConfig(configRes);
-        setBancos(bancosRes.data);
-        setBancoSelect((current) => current || configRes.bancos[0] || '');
+        setBancos(bancosRes.items);
+        const scopedResponse = await getScopedBancos(user?.id);
+        setScopedBancos(scopedResponse.data);
+        setBancoSelect(scopedResponse.data[0]?.id || '');
       } catch (err) {
         setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar datos' });
       } finally {
@@ -36,27 +57,47 @@ export default function BancosPage() {
     };
 
     void loadData();
-  }, []);
+  }, [loadBancosPage, user?.id]);
+
+  const handlePreviousPage = useCallback(() => {
+    if (pagination.offset === 0 || loading) {
+      return;
+    }
+
+    void loadBancosPage(currentPageRef.current - 1).catch((err) => {
+      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cambiar de pagina' });
+    });
+  }, [loadBancosPage, loading, pagination.offset]);
+
+  const handleNextPage = useCallback(() => {
+    if (!pagination.hasMore || loading) {
+      return;
+    }
+
+    void loadBancosPage(currentPageRef.current + 1).catch((err) => {
+      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cambiar de pagina' });
+    });
+  }, [loadBancosPage, loading, pagination.hasMore]);
 
   // Check if current fecha+banco already exists
-  const existingRecord = bancos.find(b => b.banco === banco && b.fecha === fecha);
+  const existingRecord = bancos.find((b) => b.banco_id === banco && b.fecha === fecha);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!saldo || parseFloat(saldo) < 0) {
-      setAlert({ type: 'error', message: 'Ingresa un saldo válido' });
+    if (!banco.trim() || !scopedBancos.length || !saldo || parseFloat(saldo) < 0) {
+      setAlert({ type: 'error', message: 'Selecciona un banco válido e ingresa un saldo válido' });
       return;
     }
     try {
       setSubmitting(true);
-      const result = await createBanco({ banco, saldo: parseFloat(saldo), fecha });
+      const result = await createBanco({ banco_id: banco, saldo: parseFloat(saldo), fecha });
       const msg = result.data?.overwritten
         ? `Saldo de ${banco} actualizado para ${formatDate(fecha)}: ${formatCurrency(parseFloat(saldo))}`
         : `Saldo de ${banco} registrado para ${formatDate(fecha)}: ${formatCurrency(parseFloat(saldo))}`;
       setAlert({ type: 'success', message: msg });
       setSaldo('');
-      const res = await getBancos();
-      setBancos(res.data);
+      currentPageRef.current = 0;
+      await refreshBancos();
     } catch (err) {
       setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al registrar saldo' });
     } finally {
@@ -109,7 +150,7 @@ export default function BancosPage() {
           <h1 className="page-title">🏦 Saldos Bancarios</h1>
           <p className="page-subtitle">Registro de saldos de cierre diario — 1 registro por banco/día</p>
         </div>
-        <span className="badge badge-blue">{bancos.length} registros</span>
+        <span className="badge badge-blue">{bancos.length} de {pagination.total} registros</span>
       </div>
 
       <form className="card" onSubmit={handleSubmit} id="banco-form">
@@ -121,8 +162,12 @@ export default function BancosPage() {
           </div>
           <div className="field-group">
             <label className="label" htmlFor="banco-select-page">Banco</label>
-            <select className="select" id="banco-select-page" value={banco} onChange={(e) => setBancoSelect(e.target.value)}>
-              {config.bancos.map((b) => <option key={b} value={b}>{b}</option>)}
+            <select className="select" id="banco-select-page" value={banco} onChange={(e) => setBancoSelect(e.target.value)} disabled={scopedBancos.length === 0}>
+              {scopedBancos.length === 0 ? (
+                <option value="">No hay bancos disponibles</option>
+              ) : (
+                scopedBancos.map((b) => <option key={b.id} value={b.id}>{b.nombre}</option>)
+              )}
             </select>
           </div>
           <div className="field-group">
@@ -151,7 +196,7 @@ export default function BancosPage() {
             <table className="table" id="bancos-table">
               <thead><tr><th>Fecha</th><th>Banco</th><th style={{textAlign:'right'}}>Saldo</th></tr></thead>
               <tbody>
-                {[...bancos].sort((a, b) => b.fecha.localeCompare(a.fecha)).map((b, idx) => (
+                {bancos.map((b, idx) => (
                   <tr key={b.id || idx}>
                     <td><strong>{formatDate(b.fecha)}</strong></td>
                     <td><strong>{b.banco}</strong></td>
@@ -161,6 +206,14 @@ export default function BancosPage() {
               </tbody>
             </table>
           </div>
+        )}
+        {pagination.total > 0 && (
+          <PaginationControls
+            pagination={pagination}
+            loading={loading}
+            onPrevious={handlePreviousPage}
+            onNext={handleNextPage}
+          />
         )}
       </div>
     </div>

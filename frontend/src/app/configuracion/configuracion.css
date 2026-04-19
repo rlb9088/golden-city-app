@@ -62,6 +62,7 @@
   border: 1px dashed var(--border);
   margin-bottom: var(--space-lg);
   align-items: flex-end;
+  flex-wrap: wrap;
 }
 
 .add-row-form .field-group {
@@ -71,6 +72,39 @@
 
 .add-row-form .btn {
   white-space: nowrap;
+}
+
+.add-row-form--agents {
+  align-items: stretch;
+}
+
+.add-row-form--agents .field-group {
+  min-width: 180px;
+}
+
+.toggle-field {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: var(--space-xs);
+}
+
+.toggle-pill {
+  min-height: 44px;
+  border: 1px solid var(--border);
+  background: var(--surface-hover);
+  color: var(--text);
+  border-radius: var(--radius-md);
+  padding: 0.5rem 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.toggle-pill--on {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.3);
+  color: #86efac;
 }
 
 /* CSV Import Area */
@@ -99,13 +133,100 @@
   background: rgba(239, 68, 68, 0.1);
 }
 
+.btn-icon--edit:hover {
+  color: var(--accent-gold);
+  background: rgba(234, 179, 8, 0.12);
+}
+
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+}
+
+.row-actions--agents {
+  flex-wrap: wrap;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(10px);
+}
+
+.modal-card {
+  width: min(720px, 100%);
+  max-height: min(88vh, 900px);
+  overflow: auto;
+  box-shadow: var(--shadow-lg);
+}
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+
+.modal-form {
+  display: grid;
+  gap: var(--space-lg);
+}
+
+.modal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-md);
+}
+
+.modal-grid .field-group {
+  margin-bottom: 0;
+}
+
+.modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
+.csv-import-area--compact {
+  gap: var(--space-sm);
+}
+
 @media (max-width: 768px) {
   .add-row-form {
     flex-direction: column;
     align-items: stretch;
   }
 
+  .add-row-form--agents .field-group {
+    min-width: 0;
+  }
+
   .add-row-form .btn {
     width: 100%;
+  }
+
+  .config-section-header,
+  .modal-header {
+    flex-direction: column;
+  }
+
+  .modal-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

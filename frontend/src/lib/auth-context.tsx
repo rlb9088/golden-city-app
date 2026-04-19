@@ -4,7 +4,6 @@ import {
   createContext,
   useContext,
   useEffect,
-  useEffectEvent,
   useState,
   type ReactNode,
 } from 'react';
@@ -15,9 +14,13 @@ import {
   getStoredSession,
   persistStoredSession,
   refreshStoredSession,
-  type AuthUser,
+  type AuthUser as ApiAuthUser,
   type StoredAuthSession,
 } from '@/lib/api';
+
+export interface AuthUser extends ApiAuthUser {
+  id: string;
+}
 
 const AUTH_INVALID_EVENT = 'golden-city:auth-invalid';
 const REFRESH_THRESHOLD_MS = 2 * 60 * 1000;
@@ -25,34 +28,51 @@ const REFRESH_THRESHOLD_MS = 2 * 60 * 1000;
 interface AuthContextType {
   session: AuthUser | null;
   token: string | null;
-  user: string;
+  refreshToken: string | null;
+  user: AuthUser | null;
   role: string;
   isAdmin: boolean;
   isAuthenticated: boolean;
   isReady: boolean;
   login: (username: string, password: string) => Promise<AuthUser>;
+  refreshSession: () => Promise<boolean>;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
   session: null,
   token: null,
-  user: '',
+  refreshToken: null,
+  user: null,
   role: 'agent',
   isAdmin: false,
   isAuthenticated: false,
   isReady: false,
   login: async () => ({
+    id: '',
     userId: '',
     username: '',
     role: 'agent',
     nombre: '',
   }),
+  refreshSession: async () => false,
   logout: () => {},
 });
 
 function readStoredAccessToken() {
   return getStoredSession()?.accessToken ?? null;
+}
+
+function normalizeUser(user: ApiAuthUser | AuthUser | null | undefined): AuthUser | null {
+  if (!user) {
+    return null;
+  }
+
+  const existingId = 'id' in user ? user.id : '';
+  return {
+    ...user,
+    id: existingId || user.userId,
+  };
 }
 
 function decodeJwtExp(token: string) {
@@ -73,16 +93,19 @@ function decodeJwtExp(token: string) {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(() => readStoredAccessToken());
+  const [refreshToken, setRefreshToken] = useState<string | null>(() => getStoredSession()?.refreshToken ?? null);
   const [session, setSession] = useState<AuthUser | null>(null);
   const [isReady, setIsReady] = useState(false);
 
-  const syncSessionFromStorage = useEffectEvent((storedSession: StoredAuthSession | null) => {
+  const syncSessionFromStorage = (storedSession: StoredAuthSession | null) => {
     setToken(storedSession?.accessToken ?? null);
-    setSession(storedSession?.user ?? null);
-  });
+    setRefreshToken(storedSession?.refreshToken ?? null);
+    setSession(normalizeUser(storedSession?.user));
+  };
 
   useEffect(() => {
     if (!token) {
+      setRefreshToken(null);
       setSession(null);
       setIsReady(true);
       return undefined;
@@ -96,13 +119,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) {
           return;
         }
-        setSession(response.data);
+        setSession(normalizeUser(response.data));
       } catch {
         if (cancelled) {
           return;
         }
         clearStoredSession();
         setToken(null);
+        setRefreshToken(null);
         setSession(null);
       } finally {
         if (!cancelled) {
@@ -150,6 +174,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const handleAuthInvalid = () => {
       clearStoredSession();
       setToken(null);
+      setRefreshToken(null);
       setSession(null);
       setIsReady(true);
     };
@@ -160,16 +185,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (username: string, password: string) => {
     const response = await authLogin(username, password);
-    persistStoredSession(response.data);
+    const normalizedUser = normalizeUser(response.data.user);
+    persistStoredSession({
+      ...response.data,
+      user: normalizedUser ?? response.data.user,
+    });
     setToken(response.data.accessToken);
-    setSession(response.data.user);
+    setRefreshToken(response.data.refreshToken);
+    setSession(normalizedUser);
     setIsReady(true);
-    return response.data.user;
+    return normalizedUser as AuthUser;
+  };
+
+  const refreshSession = async () => {
+    const refreshedSession = await refreshStoredSession();
+    if (!refreshedSession) {
+      return false;
+    }
+
+    syncSessionFromStorage(refreshedSession);
+    return true;
   };
 
   const logout = () => {
     clearStoredSession();
     setToken(null);
+    setRefreshToken(null);
     setSession(null);
     setIsReady(true);
   };
@@ -179,12 +220,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         session,
         token,
-        user: session?.nombre || session?.username || '',
+        refreshToken,
+        user: session,
         role: session?.role || 'agent',
         isAdmin: session?.role === 'admin',
         isAuthenticated: Boolean(session && token),
         isReady,
         login,
+        refreshSession,
         logout,
       }}
     >

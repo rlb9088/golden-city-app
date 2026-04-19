@@ -1,7 +1,7 @@
 const pagosService = require('../services/pagos.service');
 
 async function create(req, res) {
-  const { record, warnings } = await pagosService.create(req.validatedData, req.auth.user);
+  const { record, warnings } = await pagosService.create(req.validatedData, req.auth);
   res.status(201).json({ status: 'success', data: record, warnings });
 }
 
@@ -19,14 +19,14 @@ async function getAll(req, res) {
 
 async function update(req, res) {
   const { id } = req.params;
-  const pago = await pagosService.update(id, req.validatedData, req.auth.user);
+  const pago = await pagosService.update(id, req.validatedData, req.auth);
   res.json({ status: 'success', data: pago });
 }
 
 async function cancel(req, res) {
   const { id } = req.params;
   const { motivo } = req.validatedData;
-  const pago = await pagosService.cancel(id, motivo, req.auth.user);
+  const pago = await pagosService.cancel(id, motivo, req.auth);
   res.json({ status: 'success', data: pago });
 }
 

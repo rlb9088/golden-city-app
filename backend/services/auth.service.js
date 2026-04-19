@@ -4,15 +4,21 @@ const repo = require('../repositories/sheetsRepository');
 const { BadRequestError, UnauthorizedError } = require('../utils/appError');
 const logger = require('../lib/logger');
 
-const SHEET_NAME = 'config_auth_users';
-const HEADERS = ['id', 'username', 'password_hash', 'role', 'nombre'];
+const SHEET_NAME = 'config_agentes';
+const HEADERS = ['id', 'nombre', 'username', 'password_hash', 'role', 'activo'];
 const BCRYPT_ROUNDS = 10;
 const DEFAULT_ACCESS_EXPIRES_IN = '15m';
 const DEFAULT_REFRESH_EXPIRES_IN = '7d';
 const DEV_JWT_SECRET_FALLBACK = 'golden-city-dev-secret';
 const FATAL_PREFIX = 'FATAL:';
+const DEFAULT_AUTH_USER_CACHE_TTL_MS = 60 * 1000;
 
 let bootstrapUsers;
+let authUserCache = {
+  rows: null,
+  expiresAt: 0,
+};
+let authUserLoadPromise = null;
 
 function getJwtSecret() {
   const secret = process.env.JWT_SECRET || process.env.AUTH_JWT_SECRET;
@@ -51,6 +57,35 @@ function normalizeRole(value) {
   return role === 'admin' ? 'admin' : 'agent';
 }
 
+function normalizeBoolean(value) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  const normalized = normalizeText(value).toLowerCase();
+  return normalized === 'true' || normalized === '1' || normalized === 'si' || normalized === 'yes';
+}
+
+function normalizeActive(value) {
+  return normalizeBoolean(value);
+}
+
+function normalizeAgentRow(row) {
+  return {
+    id: normalizeText(row.id),
+    nombre: normalizeText(row.nombre) || normalizeText(row.username),
+    username: normalizeText(row.username).toLowerCase(),
+    password_hash: normalizeText(row.password_hash),
+    role: normalizeRole(row.role),
+    activo: normalizeActive(row.activo),
+  };
+}
+
+function sanitizeAgentRow(row) {
+  const { password_hash, ...rest } = normalizeAgentRow(row);
+  return rest;
+}
+
 function buildBootstrapUsers() {
   if (bootstrapUsers) {
     return bootstrapUsers;
@@ -58,78 +93,126 @@ function buildBootstrapUsers() {
 
   const isProduction = process.env.NODE_ENV === 'production';
   const adminPassword = process.env.AUTH_BOOTSTRAP_ADMIN_PASSWORD;
-  const agentPassword = process.env.AUTH_BOOTSTRAP_AGENT_PASSWORD;
 
   if (isProduction && !adminPassword) {
     throw new Error(`${FATAL_PREFIX} AUTH_BOOTSTRAP_ADMIN_PASSWORD no definida en produccion`);
   }
 
-  if (isProduction && !agentPassword) {
-    throw new Error(`${FATAL_PREFIX} AUTH_BOOTSTRAP_AGENT_PASSWORD no definida en produccion`);
-  }
-
-  if (!isProduction && (!adminPassword || !agentPassword)) {
-    logger.warn('Bootstrap passwords not defined. Using insecure development defaults.', {
+  if (!isProduction && !adminPassword) {
+    logger.warn('Bootstrap admin password not defined. Using insecure development default.', {
       context: { component: 'auth.bootstrap' },
     });
   }
 
-  const defaults = [
+  const adminUser = {
+    id: 'AUTH-ADMIN',
+    nombre: process.env.AUTH_BOOTSTRAP_ADMIN_NAME || 'Administrador',
+    username: process.env.AUTH_BOOTSTRAP_ADMIN_USERNAME || 'admin',
+    password: adminPassword || 'admin123',
+    role: 'admin',
+    activo: true,
+  };
+
+  bootstrapUsers = [
     {
-      id: 'AUTH-ADMIN',
-      username: process.env.AUTH_BOOTSTRAP_ADMIN_USERNAME || 'admin',
-      password: adminPassword || 'admin123',
-      role: 'admin',
-      nombre: process.env.AUTH_BOOTSTRAP_ADMIN_NAME || 'Administrador',
-    },
-    {
-      id: 'AUTH-AGENT',
-      username: process.env.AUTH_BOOTSTRAP_AGENT_USERNAME || 'agent',
-      password: agentPassword || 'agent123',
-      role: 'agent',
-      nombre: process.env.AUTH_BOOTSTRAP_AGENT_NAME || 'Agente',
+      id: adminUser.id,
+      nombre: normalizeText(adminUser.nombre) || adminUser.username,
+      username: normalizeText(adminUser.username).toLowerCase(),
+      password_hash: bcrypt.hashSync(normalizeText(adminUser.password), BCRYPT_ROUNDS),
+      role: normalizeRole(adminUser.role),
+      activo: normalizeActive(adminUser.activo),
     },
   ];
-
-  bootstrapUsers = defaults.map((user) => ({
-    id: user.id,
-    username: normalizeText(user.username),
-    password_hash: bcrypt.hashSync(normalizeText(user.password), BCRYPT_ROUNDS),
-    role: normalizeRole(user.role),
-    nombre: normalizeText(user.nombre) || user.username,
-  }));
 
   return bootstrapUsers;
 }
 
-function normalizeAuthRow(row) {
-  return {
-    id: normalizeText(row.id),
-    username: normalizeText(row.username),
-    password_hash: normalizeText(row.password_hash),
-    role: normalizeRole(row.role),
-    nombre: normalizeText(row.nombre) || normalizeText(row.username),
+function clearAuthUserCache() {
+  authUserCache = {
+    rows: null,
+    expiresAt: 0,
   };
 }
 
-async function getAuthUsers() {
-  const rows = await repo.getAll(SHEET_NAME);
-  if (!rows.length) {
-    return buildBootstrapUsers();
+function primeAuthUserCache(rows) {
+  authUserCache = {
+    rows: Array.isArray(rows) ? rows : null,
+    expiresAt: Date.now() + DEFAULT_AUTH_USER_CACHE_TTL_MS,
+  };
+}
+
+function getCachedAuthUsers() {
+  if (!Array.isArray(authUserCache.rows) || authUserCache.rows.length === 0) {
+    return null;
   }
 
-  return rows.map(normalizeAuthRow);
+  if (Date.now() > authUserCache.expiresAt) {
+    return null;
+  }
+
+  return authUserCache.rows;
+}
+
+function getBootstrapAdminUser() {
+  return buildBootstrapUsers()[0] || null;
+}
+
+function isBootstrapAdminCredentials(username, password) {
+  const bootstrapAdmin = getBootstrapAdminUser();
+  if (!bootstrapAdmin) {
+    return false;
+  }
+
+  return bootstrapAdmin.username === normalizeText(username).toLowerCase()
+    && bcrypt.compareSync(normalizeText(password), bootstrapAdmin.password_hash);
+}
+
+async function getAgentRowsRaw() {
+  const cachedUsers = getCachedAuthUsers();
+  if (cachedUsers) {
+    return cachedUsers;
+  }
+
+  if (!authUserLoadPromise) {
+    authUserLoadPromise = (async () => {
+      try {
+        const rows = await repo.getAll(SHEET_NAME);
+        const normalizedRows = rows.length ? rows.map(normalizeAgentRow) : buildBootstrapUsers();
+        primeAuthUserCache(normalizedRows);
+        return normalizedRows;
+      } catch (error) {
+        const staleUsers = authUserCache.rows;
+        if (Array.isArray(staleUsers) && staleUsers.length > 0) {
+          logger.warn('Using cached auth users after Google Sheets error', {
+            context: { component: 'auth.cache', sheetName: SHEET_NAME },
+            error,
+          });
+          return staleUsers;
+        }
+
+        throw error;
+      } finally {
+        authUserLoadPromise = null;
+      }
+    })();
+  }
+
+  return authUserLoadPromise;
+}
+
+async function getAuthUsers() {
+  return getAgentRowsRaw();
 }
 
 async function getAuthUserByUsername(username) {
   const normalizedUsername = normalizeText(username).toLowerCase();
-  const users = await getAuthUsers();
-  return users.find((user) => user.username.toLowerCase() === normalizedUsername) || null;
+  const users = await getAgentRowsRaw();
+  return users.find((user) => user.username === normalizedUsername) || null;
 }
 
 async function getAuthUserById(userId) {
   const normalizedUserId = normalizeText(userId);
-  const users = await getAuthUsers();
+  const users = await getAgentRowsRaw();
   return users.find((user) => user.id === normalizedUserId) || null;
 }
 
@@ -161,8 +244,19 @@ function signSessionWithRefresh(user) {
   };
 }
 
+function assertActiveUser(user) {
+  if (!user?.activo) {
+    throw new UnauthorizedError('El usuario esta inactivo.', {
+      context: {
+        userId: user?.id,
+        username: user?.username,
+      },
+    });
+  }
+}
+
 async function login(username, password) {
-  const normalizedUsername = normalizeText(username);
+  const normalizedUsername = normalizeText(username).toLowerCase();
   const normalizedPassword = normalizeText(password);
 
   if (!normalizedUsername || !normalizedPassword) {
@@ -171,12 +265,18 @@ async function login(username, password) {
     });
   }
 
+  if (isBootstrapAdminCredentials(normalizedUsername, normalizedPassword)) {
+    return signSessionWithRefresh(getBootstrapAdminUser());
+  }
+
   const user = await getAuthUserByUsername(normalizedUsername);
   if (!user) {
     throw new UnauthorizedError('Credenciales invalidas.', {
       context: { username: normalizedUsername },
     });
   }
+
+  assertActiveUser(user);
 
   const passwordOk = await bcrypt.compare(normalizedPassword, user.password_hash);
   if (!passwordOk) {
@@ -220,6 +320,8 @@ async function refresh(refreshToken) {
     });
   }
 
+  assertActiveUser(user);
+
   return signSessionWithRefresh(user);
 }
 
@@ -239,6 +341,7 @@ async function ensureAuthSheetSeed() {
 
   const rows = await repo.getAll(SHEET_NAME);
   if (rows.length > 0) {
+    primeAuthUserCache(rows.map(normalizeAgentRow));
     return false;
   }
 
@@ -246,12 +349,14 @@ async function ensureAuthSheetSeed() {
     await repo.append(SHEET_NAME, user, HEADERS);
   }
 
+  primeAuthUserCache(buildBootstrapUsers());
   return true;
 }
 
 module.exports = {
   HEADERS,
   SHEET_NAME,
+  clearAuthUserCache,
   ensureAuthSheetSeed,
   getAuthUserByUsername,
   getAuthUserById,

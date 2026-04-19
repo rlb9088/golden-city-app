@@ -1,14 +1,14 @@
 # Backlog - Golden City Backoffice MVP
 
-> **Ultima actualizacion**: 2026-04-16
+> **Ultima actualizacion**: 2026-04-19
 
 ---
 
 ## Resumen del Backlog
 
-| Total | Completados | Pendientes |
-|-------|-------------|------------|
-| 31 | 31 | 0 |
+| Total | Completados | En progreso/Parcial | Pendientes |
+|-------|-------------|---------------------|------------|
+| 56 | 54 | 0 | 2 |
 
 ---
 
@@ -85,42 +85,79 @@
 
 ---
 
-## Sprint 6 - Hardening pre-producción (🔴 Pendiente)
+## Sprint 6 - Hardening pre-producción (✅ Completado — con deuda menor)
 
 | # | Ticket | Estado | Esfuerzo | Prioridad |
 |---|--------|--------|----------|-----------|
-| 032 | [Proteger GETs con auth](./TICKET-032-auth-gate-gets.md) | 🔴 | ~2h | P0 |
+| 032 | [Proteger GETs con auth](./TICKET-032-auth-gate-gets.md) | ✅ | ~2h | P0 |
 | 033 | [Hardening JWT_SECRET + bootstrap](./TICKET-033-jwt-secret-hardening.md) | ✅ | ~2h | P0 |
-| 034 | [Rate-limit + Helmet](./TICKET-034-rate-limit-helmet.md) | 🔴 | ~2h | P0 |
+| 034 | [Rate-limit + Helmet](./TICKET-034-rate-limit-helmet.md) | ✅ | ~2h | P0 |
 | 035 | [Deploy prep (Dockerfile + CI)](./TICKET-035-deploy-prep.md) | ✅ | ~4h | P1 |
-| 036 | [Paginación](./TICKET-036-pagination.md) | 🔴 | ~3h | P2 |
-| 037 | [Logs centralizados](./TICKET-037-logs-centralization.md) | 🔴 | ~2h | P2 |
-| 038 | [CI/CD pipeline](./TICKET-038-cicd-pipeline.md) | 🔴 | ~3h | P2 |
-| 039 | [Refresh tokens](./TICKET-039-refresh-tokens.md) | 🔴 | ~3h | P3 |
+| 036 | [Paginación](./TICKET-036-pagination.md) | 🟡 | ~3h | P2 |
+| 037 | [Logs centralizados](./TICKET-037-logs-centralization.md) | ✅ | ~2h | P2 |
+| 038 | [CI/CD pipeline](./TICKET-038-cicd-pipeline.md) | ✅ | ~3h | P2 |
+| 039 | [Refresh tokens](./TICKET-039-refresh-tokens.md) | 🟡 | ~3h | P3 |
+
+> **Notas Sprint 6**:
+> - 032, 034, 037, 038: implementados y verificados en código.
+> - 036 ✅: paginación unificada completada en todos los listados (TICKET-045).
+> - 039 ✅: refresh tokens integrados en frontend (TICKET-046).
 
 ---
 
-## Orden de Ejecucion Recomendado (Sprint 6)
+---
 
-**Prioritario (bloquea producción)**:
-```
-TICKET-032 (auth GETs)
-TICKET-033 (JWT_SECRET hardening)
-TICKET-034 (rate-limit + helmet)
-TICKET-035 (deploy prep + Dockerfile)
-```
+## Sprint 7 - Bugfix post-UAT (✅ Completado)
 
-**Importante (antes de abrir a usuarios)**:
-```
-TICKET-036 (paginación)
-TICKET-037 (logs centralizados)
-TICKET-038 (CI/CD)
-```
+| # | Ticket | Estado | Esfuerzo | Prioridad |
+|---|--------|--------|----------|-----------|
+| 040 | [Edición de registros en Configuración](./TICKET-040-config-edit.md) | ✅ | ~3h | P1 |
+| 041 | [Bancos: propietario como FK a config_agentes](./TICKET-041-bancos-propietario-fk.md) | ✅ | ~2h | P1 |
+| 042 | [Importación masiva: batch append Sheets](./TICKET-042-import-batch-sheets.md) | ✅ | ~2h | P0 |
+| 043 | [Pagos: autocomplete usuario ≥2 chars](./TICKET-043-pagos-user-combobox.md) | ✅ | ~2h | P2 |
+| 044 | [Persistencia de comprobante en Cloudflare R2](./TICKET-044-receipt-storage-drive.md) | ✅ | ~3h | P1 |
 
-**Post-lanzamiento**:
-```
-TICKET-039 (refresh tokens)
-```
+---
+
+## Sprint 8 - Deuda técnica post Sprint-6 (✅ Completado)
+
+| # | Ticket | Estado | Esfuerzo | Prioridad |
+|---|--------|--------|----------|-----------|
+| 045 | [Unificar paginación en todos los listados](./TICKET-045-pagination-unification.md) | ✅ | ~3h | P2 |
+| 046 | [Refresh tokens: integración frontend](./TICKET-046-refresh-tokens-frontend.md) | ✅ | ~2h | P2 |
+
+---
+
+## Sprint 9 - Identidad unificada y scoping por propietario (✅ Completado)
+
+| # | Ticket | Estado | Esfuerzo | Prioridad |
+|---|--------|--------|----------|-----------|
+| 047 | [Unificar config_agentes como única fuente de identidad](./TICKET-047-unified-identity-agentes.md) | ✅ | ~5h | P0 |
+| 048 | [banco_id como FK en pagos/ingresos/gastos/bancos](./TICKET-048-banco-id-fk.md) | ✅ | ~3h | P0 |
+| 049 | [Scoping de bancos por propietario en Pagos](./TICKET-049-pagos-bancos-scoping.md) | ✅ | ~3h | P1 |
+| 050 | [Scoping bancos en Ingresos/Gastos/Bancos saldos](./TICKET-050-scoping-ingresos-gastos-bancos.md) | ✅ | ~3h | P1 |
+| 053 | [Migración histórica de banco_id](./TICKET-053-migracion-banco-id-historico.md) | ✅ | ~2h | P1 |
+| 054 | [Migración config_auth_users → config_agentes](./TICKET-054-migracion-auth-users-agentes.md) | ✅ | ~2h | P0 |
+
+---
+
+## Sprint 10 - Migración de almacenamiento y documentación (✅ Completado)
+
+| # | Ticket | Estado | Esfuerzo | Prioridad |
+|---|--------|--------|----------|-----------|
+| 051 | [Migrar comprobantes Drive → Cloudflare R2](./TICKET-051-receipts-r2-migration.md) | ✅ | ~3h | P1 |
+| 052 | [Sincronizar documentación tras 40-46 + 047-054](./TICKET-052-docs-sync.md) | ✅ | ~2h | P2 |
+
+---
+
+## Sprint 11 - Pre-producción y Despliegue (🔴 Pendiente)
+
+| # | Ticket | Estado | Esfuerzo | Prioridad |
+|---|--------|--------|----------|-----------|
+| 055 | [Ejecución de migraciones pre-producción](./TICKET-055-migraciones-preproduccion.md) | ✅ | ~2h | P0 |
+| 056 | [Despliegue a producción — Vercel + Railway](./TICKET-056-deploy-produccion.md) | 🔴 | ~3h | P0 |
+
+> **Nota Sprint 11**: TICKET-055 es bloqueante de TICKET-056. Los scripts de migración deben ejecutarse contra la hoja de producción antes del primer deploy.
 
 ---
 

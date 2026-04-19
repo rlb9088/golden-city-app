@@ -1,7 +1,7 @@
 # Arquitectura — Golden City Backoffice
 
-> **Versión**: 1.2  
-> **Última actualización**: 2026-04-16
+> **Versión**: 1.5  
+> **Última actualización**: 2026-04-19
 
 ---
 
@@ -46,7 +46,7 @@
 │  │                    └────────────────┘                     │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │                             │                                    │
-│                    Google Sheets API v4                          │
+│               Google Sheets API v4 + Cloudflare R2              │
 │                    (o in-memory fallback)                        │
 │                             │                                    │
 │  ┌──────────────────────────────────────────────────────────┐   │
@@ -316,6 +316,7 @@ Formato: `{PREFIJO}-{timestamp}-{counter}`
 - **Autenticación**: Service Account (keyFile JSON)
 - **Permisos**: spreadsheets + drive.readonly
 - **Operaciones**: read (values.get), append (values.append), update (values.update)
+- **Límite conocido**: ~100 req/100s — las importaciones masivas deben usar batch append (TICKET-042; ver ADR-019)
 
 ### 5.2 Google Cloud Vision API
 - **Propósito**: OCR primario para comprobantes
@@ -329,12 +330,20 @@ Formato: `{PREFIJO}-{timestamp}-{counter}`
 - **Input**: Buffer de imagen
 - **Archivo de datos**: `spa.traineddata` (~3.3MB incluido en backend)
 
+### 5.4 Cloudflare R2
+- **Propósito**: Almacenamiento persistente de comprobantes de pago
+- **Autenticación**: credenciales S3-compatible (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`)
+- **Operaciones**: `PutObject` para subir comprobantes y guardar una key persistente en `comprobante_file_id`
+- **Salida**: `comprobante_url` pública basada en `R2_PUBLIC_URL`
+- **Variables de entorno**: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_URL`
+- **Decisión**: ver ADR-020
+
 ---
 
 ## 6. Seguridad
 
 ### 6.1 Estado Actual
-- **Auth real**: JWT con bcrypt (tabla `config_auth_users` en Sheets, bootstrap 2 usuarios)
+- **Auth real**: JWT + bcrypt (tabla `config_agentes` como fuente única de identidad; `config_auth_users` deprecada — ver ADR-021)
 - **Token expiration**: 24h configurable
 - **CORS**: configurado a `http://localhost:3000` (requiere `CORS_ORIGIN` env para prod)
 - **Validación de entrada**: Zod en todos los endpoints de escritura
@@ -346,6 +355,7 @@ Formato: `{PREFIJO}-{timestamp}-{counter}`
 - ✅ **Bootstrap controlado**: las credenciales base se exigen por env en producción; en desarrollo se permiten defaults inseguros solo para demo.
 - ✅ **Rate-limit + Helmet**: login con límite específico, middleware global moderado y headers de seguridad estándar activados.
 - ✅ **Service Account key**: en `/keys/` (no commiteado si `.gitignore` correcto)
+- ✅ **Refresh tokens**: backend y frontend completos (15min access / 7d refresh, secret separado, auto-renovación en cliente).
 
 ### 6.3 Credenciales
 - En `.env` (no commiteado)
@@ -385,36 +395,40 @@ Frontend (localhost:3000)  →  Backend (localhost:3001)
 | Backend: auditoría | ✅ Completo | Append-only |
 | Backend: error handling | ✅ Completo | AppError hierarchy + retry con backoff |
 | Backend: validación referencial | ✅ Completo | Warnings no bloqueantes + audit logging |
+| Backend: paginación unificada | ✅ Completo | Todos los listados usan limit/offset + metadata |
 | Frontend: design system | ✅ Completo | Dark theme, gold accents, responsive |
 | Frontend: login | ✅ Completo | username/password + JWT almacenado + redirección |
 | Frontend: sidebar + nav | ✅ Completo | Badge rol + logout + hamburger mobile (rol selector eliminado) |
 | Frontend: dashboard balance | ✅ Completo | 4 cards + 2 tablas + skeleton (excluye anulados) |
+| Frontend: paginación de listados | ✅ Completo | PaginationControls unificado en pagos, ingresos, gastos, bancos y audit |
+| Frontend: refresh tokens | ✅ Completo | Interceptor de 401 renueva sesión con refresh token |
 | Frontend: formulario pagos | ✅ Completo | Con OCR + validación + skeleton + filtros + editar/anular |
 | Frontend: formulario ingresos | ✅ Completo | Admin only |
 | Frontend: formulario gastos | ✅ Completo | Con categorías dinámicas |
 | Frontend: formulario bancos | ✅ Completo | Con upsert warning |
-| Frontend: configuración | ✅ Completo | Tabs + CRUD + import + delete real |
+| Frontend: configuración | ✅ Completo | CRUD completo con edición e importación masiva |
 | Frontend: auditoría UI | ✅ Completo | Tabla + filtros + JSON expandible (admin only) |
 | Frontend: UX resilience | ✅ Completo | Health polling, timeout, retry, skeletons |
 | Google Sheets: conexión | ✅ Completo | Configurado y verificado E2E |
 | Google Sheets: hojas creadas | ✅ Completo | Script automático + verificación |
-| Auth real | ✅ Completo | JWT + bcrypt (tabla config_auth_users, bootstrap 2 usuarios) |
+| Auth real | ✅ Completo | JWT + bcrypt (tabla `config_agentes`, bootstrap configurable; ver ADR-021) |
+| Identidad unificada + scoping por propietario | ✅ Completo | `config_agentes` fuente única; `banco_id` FK; GET /bancos/scoped; validación 403 en pagos/ingresos/bancos |
+| Migración R2 (comprobantes) | ✅ Completo | R2 reemplaza Drive; degradación elegante si R2 no configurado (ver ADR-020) |
 | Filtros pagos | ✅ Completo | Query params + normalización de fechas + combinación AND |
 | Anulación/edición | ✅ Completo | Soft-delete (estado='anulado'), auditoría con motivo |
+| Comprobantes de pago | ✅ Completo | Imagen persistida en Cloudflare R2 con `comprobante_file_id` |
 | Tests | ✅ Completo | 8 suites node:test + E2E contra Sheets real |
 | CI/CD | ✅ Completo | GitHub Actions ejecuta tests backend, lint/build frontend, npm audit y docker build en main |
 | Deploy | ✅ Completo | Dockerfile, entrypoint, .gitignore, .dockerignore y guia de deploy listos |
 
 ---
 
-## 9. Pendientes Arquitectónicos
+## 9. Pendientes Pre-Producción
 
-### Crítica (bloquea producción)
-1. **Paginación** — Todas las queries traen A:Z; riesgo de rate-limit Sheets (TICKET-036)
-2. **Logs persistidos** — JSON console.log sin agregador (TICKET-037)
+### Bloquean el pase a producción (Sprint 11)
+1. **Ejecución de scripts de migración** — `migrateAuthUsersToAgentes.js` y `migrateBancoId.js` deben ejecutarse en modo `--dry-run` + `--commit` contra la hoja de producción antes del primer deploy (TICKET-055)
+2. **Despliegue Vercel + Railway** — frontend en Vercel, backend en Railway; configurar variables de entorno, CORS y credenciales Google (TICKET-056)
 
-### Media (ops/escala)
-3. **Refresh tokens** — 24h sin sesión renovable (TICKET-039)
-
-### Baja (post-lanzamiento)
-4. **Duplicación código** — update/cancel en servicios (refactor, low ROI)
+### Deuda técnica menor (no bloquean)
+- `config_auth_users` en `sheetsSchema.js` marcada como deprecada; la hoja en producción se renombrará a `_deprecated` durante TICKET-055
+- IDs basados en timestamp (ADR-009): aceptable para MVP; considerar `crypto.randomUUID()` en el futuro

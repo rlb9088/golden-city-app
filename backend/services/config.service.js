@@ -1,17 +1,19 @@
+const bcrypt = require('bcrypt');
 const repo = require('../repositories/sheetsRepository');
 const audit = require('./audit.service');
-const { NotFoundError } = require('../utils/appError');
+const authService = require('./auth.service');
+const { BadRequestError, NotFoundError } = require('../utils/appError');
 const logger = require('../lib/logger');
 
 /**
- * Servicio de configuración — CRUD sobre tablas de config.
+ * Servicio de configuracion - CRUD sobre tablas de config.
  * Cada tabla tiene su propia hoja en Google Sheets (o store in-memory).
  */
 
 const TABLES = {
-  agentes: { sheet: 'config_agentes', headers: ['id', 'nombre'] },
+  agentes: { sheet: 'config_agentes', headers: ['id', 'nombre', 'username', 'password_hash', 'role', 'activo'] },
   categorias: { sheet: 'config_categorias', headers: ['id', 'categoria', 'subcategoria'] },
-  bancos: { sheet: 'config_bancos', headers: ['id', 'nombre', 'propietario'] },
+  bancos: { sheet: 'config_bancos', headers: ['id', 'nombre', 'propietario', 'propietario_id'] },
   cajas: { sheet: 'config_cajas', headers: ['id', 'nombre'] },
   usuarios: { sheet: 'config_usuarios', headers: ['id', 'nombre'] },
   tipos_pago: { sheet: 'config_tipos_pago', headers: ['id', 'nombre'] },
@@ -20,9 +22,9 @@ const TABLES = {
 // Default seed data (used when tables are empty)
 const SEED_DATA = {
   agentes: [
-    { id: 'AG-1', nombre: 'Agente 1' },
-    { id: 'AG-2', nombre: 'Agente 2' },
-    { id: 'AG-3', nombre: 'Agente 3' },
+    { id: 'AG-1', nombre: 'Agente 1', username: 'agente1', password_hash: '', role: 'agent', activo: true },
+    { id: 'AG-2', nombre: 'Agente 2', username: 'agente2', password_hash: '', role: 'agent', activo: true },
+    { id: 'AG-3', nombre: 'Agente 3', username: 'agente3', password_hash: '', role: 'agent', activo: true },
   ],
   categorias: [
     { id: 'CAT-1', categoria: 'Operativo', subcategoria: 'Material oficina' },
@@ -36,11 +38,11 @@ const SEED_DATA = {
     { id: 'CAT-9', categoria: 'Otros', subcategoria: 'Varios' },
   ],
   bancos: [
-    { id: 'BK-1', nombre: 'BCP', propietario: 'Negocio' },
-    { id: 'BK-2', nombre: 'Interbank', propietario: 'Negocio' },
-    { id: 'BK-3', nombre: 'BBVA', propietario: 'Negocio' },
-    { id: 'BK-4', nombre: 'Scotiabank', propietario: 'Agente 1' },
-    { id: 'BK-5', nombre: 'Yape', propietario: 'Agente 2' },
+    { id: 'BK-1', nombre: 'BCP', propietario_id: 'AG-1' },
+    { id: 'BK-2', nombre: 'Interbank', propietario_id: 'AG-1' },
+    { id: 'BK-3', nombre: 'BBVA', propietario_id: 'AG-2' },
+    { id: 'BK-4', nombre: 'Scotiabank', propietario_id: 'AG-2' },
+    { id: 'BK-5', nombre: 'Yape', propietario_id: 'AG-3' },
   ],
   cajas: [
     { id: 'CJ-1', nombre: 'Caja 1' },
@@ -63,6 +65,94 @@ function normalizeLookup(value) {
   return String(value ?? '').trim().toLowerCase();
 }
 
+function normalizeText(value) {
+  return String(value ?? '').trim();
+}
+
+function getUniqueLabels(rows, field) {
+  const seen = new Set();
+  const uniqueValues = [];
+
+  for (const row of rows) {
+    const value = normalizeText(row?.[field]);
+    if (!value) {
+      continue;
+    }
+
+    const lookup = normalizeLookup(value);
+    if (seen.has(lookup)) {
+      continue;
+    }
+
+    seen.add(lookup);
+    uniqueValues.push(value);
+  }
+
+  return uniqueValues;
+}
+
+function normalizeBool(value, fallback = false) {
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  const normalized = normalizeLookup(value);
+  if (!normalized) {
+    return fallback;
+  }
+
+  return normalized === 'true' || normalized === '1' || normalized === 'si' || normalized === 'yes';
+}
+
+function normalizeAgentRow(record) {
+  return {
+    ...record,
+    id: normalizeText(record.id),
+    nombre: normalizeText(record.nombre) || normalizeText(record.username),
+    username: normalizeLookup(record.username),
+    password_hash: normalizeText(record.password_hash),
+    role: normalizeLookup(record.role) === 'admin' ? 'admin' : 'agent',
+    activo: normalizeBool(record.activo, true),
+  };
+}
+
+function sanitizeAgentRow(record) {
+  const { password_hash, ...rest } = normalizeAgentRow(record);
+  return rest;
+}
+
+function stripInternalFields(record) {
+  const { _rowIndex, ...rest } = record;
+  return rest;
+}
+
+function getWritableFields(tableName) {
+  return TABLES[tableName].headers.filter((field) => field !== 'id');
+}
+
+function pickPatchFields(tableName, patch) {
+  const allowedFields = new Set(getWritableFields(tableName));
+  const sourcePatch = patch && typeof patch === 'object' ? patch : {};
+  const nextPatch = {};
+
+  if (tableName === 'agentes') {
+    allowedFields.add('password');
+    allowedFields.add('password_hash');
+  }
+
+  for (const field of allowedFields) {
+    if (Object.prototype.hasOwnProperty.call(sourcePatch, field)) {
+      nextPatch[field] = sourcePatch[field] ?? '';
+    }
+  }
+
+  return nextPatch;
+}
+
 function assertTable(tableName) {
   if (!TABLES[tableName]) {
     throw new NotFoundError(`La tabla ${tableName} no existe.`, {
@@ -71,13 +161,201 @@ function assertTable(tableName) {
   }
 }
 
-async function getTable(tableName) {
+function isAgentTable(tableName) {
+  return tableName === 'agentes';
+}
+
+function parseAgentRole(value, { required = false } = {}) {
+  const role = normalizeLookup(value);
+  if (!role) {
+    if (required) {
+      throw new BadRequestError('El rol es obligatorio para agentes.', {
+        context: { tableName: 'agentes' },
+      });
+    }
+    return '';
+  }
+
+  if (role !== 'admin' && role !== 'agent') {
+    throw new BadRequestError('El rol debe ser admin o agent.', {
+      context: { tableName: 'agentes', role },
+    });
+  }
+
+  return role;
+}
+
+function parseAgentPassword(value) {
+  return normalizeText(value);
+}
+
+function normalizeAgentWriteInput(input, existingRecord = null, { requirePassword = false } = {}) {
+  const source = input && typeof input === 'object' ? input : {};
+  const nextRecord = existingRecord ? { ...normalizeAgentRow(existingRecord) } : {};
+  const hasRole = Object.prototype.hasOwnProperty.call(source, 'role');
+
+  if (Object.prototype.hasOwnProperty.call(source, 'nombre')) {
+    nextRecord.nombre = normalizeText(source.nombre);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(source, 'username')) {
+    nextRecord.username = normalizeLookup(source.username);
+  }
+
+  if (hasRole) {
+    nextRecord.role = parseAgentRole(source.role, { required: true });
+  }
+
+  if (Object.prototype.hasOwnProperty.call(source, 'activo')) {
+    nextRecord.activo = normalizeBool(source.activo, existingRecord ? normalizeBool(existingRecord.activo, true) : true);
+  }
+
+  const hasPassword = Object.prototype.hasOwnProperty.call(source, 'password');
+  const passwordValue = hasPassword ? parseAgentPassword(source.password) : '';
+  const hasPasswordHash = Object.prototype.hasOwnProperty.call(source, 'password_hash');
+  const passwordHashValue = hasPasswordHash ? normalizeText(source.password_hash) : '';
+
+  if (hasPassword) {
+    if (!passwordValue) {
+      throw new BadRequestError('La contrasena no puede estar vacia.', {
+        context: { tableName: 'agentes' },
+      });
+    }
+
+    nextRecord.password_hash = bcrypt.hashSync(passwordValue, 10);
+  } else if (hasPasswordHash && passwordHashValue) {
+    nextRecord.password_hash = passwordHashValue;
+  } else if (existingRecord?.password_hash) {
+    nextRecord.password_hash = normalizeText(existingRecord.password_hash);
+  } else if (requirePassword) {
+    throw new BadRequestError('La contrasena es obligatoria para agentes.', {
+      context: { tableName: 'agentes' },
+    });
+  }
+
+  if (!nextRecord.nombre) {
+    throw new BadRequestError('El nombre es obligatorio para agentes.', {
+      context: { tableName: 'agentes' },
+    });
+  }
+
+  if (!nextRecord.username) {
+    throw new BadRequestError('El username es obligatorio para agentes.', {
+      context: { tableName: 'agentes' },
+    });
+  }
+
+  if (!nextRecord.role) {
+    if (!existingRecord && !hasRole) {
+      throw new BadRequestError('El rol es obligatorio para agentes.', {
+        context: { tableName: 'agentes' },
+      });
+    }
+
+    nextRecord.role = existingRecord ? normalizeAgentRow(existingRecord).role : 'agent';
+  }
+
+  if (typeof nextRecord.activo !== 'boolean') {
+    nextRecord.activo = existingRecord ? normalizeBool(existingRecord.activo, true) : true;
+  }
+
+  return nextRecord;
+}
+
+function buildUpdatedRecord(existing, patch, tableName) {
+  const nextRecord = { ...existing };
+
+  for (const [field, value] of Object.entries(pickPatchFields(tableName, patch))) {
+    nextRecord[field] = value;
+  }
+
+  return nextRecord;
+}
+
+function normalizeActiveAgentCount(rows) {
+  return rows.filter((row) => normalizeLookup(row.role) === 'admin' && normalizeBool(row.activo, true)).length;
+}
+
+function ensureUniqueAgentUsername(rows, candidate, currentId = null) {
+  const username = normalizeLookup(candidate.username);
+  if (!username) {
+    throw new BadRequestError('El username es obligatorio para agentes.', {
+      context: { tableName: 'agentes' },
+    });
+  }
+
+  const duplicate = rows.find((row) => row.id !== currentId && normalizeLookup(row.username) === username);
+  if (duplicate) {
+    throw new BadRequestError('El username ya existe. Debe ser unico.', {
+      context: {
+        tableName: 'agentes',
+        username,
+        duplicateId: duplicate.id,
+      },
+    });
+  }
+}
+
+function ensureAgentSafety(rows, currentId, candidate, operation) {
+  const normalizedRows = rows.map(normalizeAgentRow);
+  const existingActiveAdmins = normalizeActiveAgentCount(normalizedRows);
+
+  if (operation === 'add') {
+    ensureUniqueAgentUsername(normalizedRows, candidate);
+    return;
+  }
+
+  if (operation === 'update') {
+    ensureUniqueAgentUsername(normalizedRows, candidate, currentId);
+  }
+
+  const nextRows = operation === 'remove'
+    ? normalizedRows.filter((row) => row.id !== currentId)
+    : normalizedRows.map((row) => (row.id === currentId ? candidate : row));
+
+  const nextActiveAdmins = normalizeActiveAgentCount(nextRows);
+
+  if (existingActiveAdmins > 0 && nextActiveAdmins === 0) {
+    throw new BadRequestError('No se puede dejar al sistema sin un admin activo.', {
+      context: {
+        tableName: 'agentes',
+        id: currentId,
+        operation,
+      },
+    });
+  }
+}
+
+async function getStoredRows(tableName) {
   assertTable(tableName);
-  const data = await repo.getAll(TABLES[tableName].sheet);
-  if (data.length === 0 && SEED_DATA[tableName]?.length > 0) {
+  const rows = await repo.getAll(TABLES[tableName].sheet);
+  if (rows.length === 0 && SEED_DATA[tableName]?.length > 0) {
     return SEED_DATA[tableName];
   }
-  return data;
+
+  return rows;
+}
+
+async function getTable(tableName) {
+  assertTable(tableName);
+  const rows = await getStoredRows(tableName);
+  if (isAgentTable(tableName)) {
+    return rows.map(sanitizeAgentRow);
+  }
+  if (tableName === 'bancos') {
+    return Promise.all(rows.map((row) => hydrateBancoRecordForRead(row)));
+  }
+  return rows;
+}
+
+async function getConfigBancoById(bancoId) {
+  const id = normalizeText(bancoId);
+  if (!id) {
+    return null;
+  }
+
+  const bancos = await getTable('bancos');
+  return bancos.find((row) => normalizeLookup(row.id) === normalizeLookup(id)) || null;
 }
 
 async function existsInTable(tableName, value, field = 'nombre', matcher = null) {
@@ -95,7 +373,7 @@ async function existsInTable(tableName, value, field = 'nombre', matcher = null)
 }
 
 function formatReferenceWarning({ label, value, tableLabel }) {
-  return `El ${label} "${value}" no existe en ${tableLabel}. Se registró igualmente para no bloquear la operación.`;
+  return `El ${label} "${value}" no existe en ${tableLabel}. Se registro igualmente para no bloquear la operacion.`;
 }
 
 function removeFromSeedData(tableName, id) {
@@ -110,6 +388,116 @@ function removeFromSeedData(tableName, id) {
 
   const [removed] = SEED_DATA[tableName].splice(index, 1);
   return removed;
+}
+
+async function resolveBancoPropietario(rawValue) {
+  const value = String(rawValue ?? '').trim();
+  if (!value) {
+    throw new BadRequestError('El propietario_id es requerido para bancos.', {
+      context: {
+        tableName: 'bancos',
+      },
+    });
+  }
+
+  const agentes = await getStoredRows('agentes');
+  const match = agentes.find((agente) => (
+    normalizeLookup(agente.id) === normalizeLookup(value)
+    || normalizeLookup(agente.nombre) === normalizeLookup(value)
+  ));
+
+  if (!match) {
+    throw new BadRequestError('El agente especificado no existe en configuracion.', {
+      context: {
+        tableName: 'bancos',
+        propietario_id: value,
+      },
+    });
+  }
+
+  return normalizeAgentRow(match);
+}
+
+async function normalizeBancoRecord(record, { requireOwner = false } = {}) {
+  const nextRecord = { ...record };
+  const hasPropietarioId = Object.prototype.hasOwnProperty.call(nextRecord, 'propietario_id');
+  const hasPropietario = Object.prototype.hasOwnProperty.call(nextRecord, 'propietario');
+  const rawOwner = hasPropietarioId ? nextRecord.propietario_id : nextRecord.propietario;
+
+  if (rawOwner !== undefined && rawOwner !== null && String(rawOwner).trim() !== '') {
+    const propietario = await resolveBancoPropietario(rawOwner);
+    nextRecord.propietario_id = propietario.id;
+    nextRecord.propietario = propietario.nombre;
+    return nextRecord;
+  }
+
+  if (requireOwner) {
+    throw new BadRequestError('El propietario_id es requerido para bancos.', {
+      context: {
+        tableName: 'bancos',
+      },
+    });
+  }
+
+  if (hasPropietarioId && String(nextRecord.propietario_id ?? '').trim() === '') {
+    delete nextRecord.propietario_id;
+  }
+
+  if (hasPropietario && String(nextRecord.propietario ?? '').trim() === '') {
+    delete nextRecord.propietario;
+  }
+
+  return nextRecord;
+}
+
+async function hydrateBancoRecordForRead(record) {
+  try {
+    return await normalizeBancoRecord(record);
+  } catch {
+    return {
+      ...record,
+      propietario: normalizeText(record?.propietario),
+      propietario_id: normalizeText(record?.propietario_id),
+    };
+  }
+}
+
+function getImportLabel(tableName, record) {
+  if (record?.nombre) {
+    return record.nombre;
+  }
+
+  if (tableName === 'categorias') {
+    const parts = [record?.categoria, record?.subcategoria].filter((value) => String(value ?? '').trim() !== '');
+    if (parts.length > 0) {
+      return parts.join(' / ');
+    }
+  }
+
+  if (record?.categoria) {
+    return record.categoria;
+  }
+
+  return record?.id || '';
+}
+
+function createConfigRecord(tableName, item) {
+  const id = `${tableName.toUpperCase().slice(0, 3)}-${Date.now()}-${counters[tableName]++}`;
+  return { id, ...item };
+}
+
+function updateSeedRecord(tableName, id, nextRecord) {
+  if (!SEED_DATA[tableName]) {
+    return false;
+  }
+
+  const index = SEED_DATA[tableName].findIndex((item) => item.id === id);
+  if (index === -1) {
+    return false;
+  }
+
+  SEED_DATA[tableName][index] = stripInternalFields(nextRecord);
+  return true;
 }
 
 async function validateReferences(checks, user = 'system', entity = 'registro') {
@@ -170,17 +558,206 @@ async function validateReferences(checks, user = 'system', entity = 'registro') 
 async function addToTable(tableName, item, user = 'system') {
   assertTable(tableName);
   const { sheet, headers } = TABLES[tableName];
-  const id = `${tableName.toUpperCase().slice(0, 3)}-${Date.now()}-${counters[tableName]++}`;
-  const record = { id, ...item };
+  const normalizedItem = tableName === 'bancos'
+    ? await normalizeBancoRecord(item, { requireOwner: true })
+    : item;
+
+  if (isAgentTable(tableName)) {
+    const currentRows = await getStoredRows('agentes');
+    const record = createConfigRecord(tableName, normalizeAgentWriteInput(normalizedItem, null, { requirePassword: true }));
+    ensureAgentSafety(currentRows, null, record, 'add');
+    await repo.append(sheet, record, headers);
+    authService.clearAuthUserCache();
+    await audit.log('create', `config_${tableName}`, user, stripInternalFields(record));
+    return sanitizeAgentRow(record);
+  }
+
+  const record = createConfigRecord(tableName, normalizedItem);
   await repo.append(sheet, record, headers);
   await audit.log('create', `config_${tableName}`, user, record);
   return record;
+}
+
+async function updateAgentPassword(id, password, user = 'system') {
+  assertTable('agentes');
+
+  const nextPassword = parseAgentPassword(password);
+  if (!nextPassword) {
+    throw new BadRequestError('La contrasena es obligatoria para el cambio de password.', {
+      context: { tableName: 'agentes', id },
+    });
+  }
+
+  const { sheet, headers } = TABLES.agentes;
+  const realRows = await repo.getAll(sheet);
+  const existingRecord = realRows.find((item) => item.id === id);
+  const seedRecord = !existingRecord ? (SEED_DATA.agentes || []).find((item) => item.id === id) : null;
+  const sourceRecord = existingRecord || seedRecord;
+
+  if (!sourceRecord) {
+    throw new NotFoundError(`No se encontro el registro ${id} en la tabla agentes.`, {
+      context: {
+        tableName: 'agentes',
+        id,
+      },
+    });
+  }
+
+  const currentRows = await getStoredRows('agentes');
+  const nextRecord = normalizeAgentWriteInput(
+    { password: nextPassword },
+    sourceRecord,
+    { requirePassword: true },
+  );
+
+  ensureAgentSafety(currentRows, id, nextRecord, 'update');
+
+  if (existingRecord) {
+    const storedNextRecord = { ...existingRecord, password_hash: nextRecord.password_hash };
+    await repo.update(sheet, existingRecord._rowIndex, storedNextRecord, headers);
+    authService.clearAuthUserCache();
+    await audit.log('update_password', 'config_agentes', user, {
+      id,
+      username: normalizeLookup(sourceRecord.username),
+    });
+    return sanitizeAgentRow(storedNextRecord);
+  }
+
+  const storedNextRecord = { ...sourceRecord, password_hash: nextRecord.password_hash };
+  updateSeedRecord('agentes', id, storedNextRecord);
+  authService.clearAuthUserCache();
+  await audit.log('update_password', 'config_agentes', user, {
+    id,
+    username: normalizeLookup(sourceRecord.username),
+  });
+  return sanitizeAgentRow(storedNextRecord);
+}
+
+async function updateInTable(tableName, id, patch = {}, user = 'system') {
+  assertTable(tableName);
+
+  const { sheet, headers } = TABLES[tableName];
+
+  if (isAgentTable(tableName)) {
+    const realRows = await repo.getAll(sheet);
+    const existingRecord = realRows.find((item) => item.id === id);
+    const seedRecord = !existingRecord ? (SEED_DATA.agentes || []).find((item) => item.id === id) : null;
+    const sourceRecord = existingRecord || seedRecord;
+
+    if (!sourceRecord) {
+      throw new NotFoundError(`No se encontro el registro ${id} en la tabla ${tableName}.`, {
+        context: {
+          tableName,
+          id,
+        },
+      });
+    }
+
+    const currentRows = await getStoredRows(tableName);
+    const nextRecord = normalizeAgentWriteInput(patch, sourceRecord);
+    ensureAgentSafety(currentRows, id, nextRecord, 'update');
+
+    if (existingRecord) {
+      const storedNextRecord = { ...existingRecord, ...nextRecord };
+      await repo.update(sheet, existingRecord._rowIndex, storedNextRecord, headers);
+      authService.clearAuthUserCache();
+      await audit.log('update', `config_${tableName}`, user, {
+        before: stripInternalFields(normalizeAgentRow(existingRecord)),
+        after: sanitizeAgentRow(storedNextRecord),
+        changes: pickPatchFields(tableName, patch),
+      });
+      return sanitizeAgentRow(storedNextRecord);
+    }
+
+    const storedNextRecord = { ...sourceRecord, ...nextRecord };
+    updateSeedRecord(tableName, id, storedNextRecord);
+    authService.clearAuthUserCache();
+    await audit.log('update', `config_${tableName}`, user, {
+      before: sanitizeAgentRow(sourceRecord),
+      after: sanitizeAgentRow(storedNextRecord),
+      changes: pickPatchFields(tableName, patch),
+    });
+    return sanitizeAgentRow(storedNextRecord);
+  }
+
+  const realRows = await repo.getAll(sheet);
+  const existingRecord = realRows.find((item) => item.id === id);
+  const nextPatch = tableName === 'bancos'
+    ? await normalizeBancoRecord(pickPatchFields(tableName, patch))
+    : pickPatchFields(tableName, patch);
+
+  if (existingRecord) {
+    const nextRecord = buildUpdatedRecord(existingRecord, nextPatch, tableName);
+    await repo.update(sheet, existingRecord._rowIndex, nextRecord, headers);
+    await audit.log('update', `config_${tableName}`, user, {
+      before: stripInternalFields(existingRecord),
+      after: stripInternalFields(nextRecord),
+      changes: nextPatch,
+    });
+    return stripInternalFields(nextRecord);
+  }
+
+  const seedRows = SEED_DATA[tableName] || [];
+  const seedRecord = seedRows.find((item) => item.id === id);
+
+  if (seedRecord) {
+    const nextRecord = buildUpdatedRecord(seedRecord, nextPatch, tableName);
+    updateSeedRecord(tableName, id, nextRecord);
+    await audit.log('update', `config_${tableName}`, user, {
+      before: stripInternalFields(seedRecord),
+      after: stripInternalFields(nextRecord),
+      changes: nextPatch,
+    });
+    return stripInternalFields(nextRecord);
+  }
+
+  throw new NotFoundError(`No se encontro el registro ${id} en la tabla ${tableName}.`, {
+    context: {
+      tableName,
+      id,
+    },
+  });
 }
 
 async function removeFromTable(tableName, id, user = 'system') {
   assertTable(tableName);
 
   const { sheet } = TABLES[tableName];
+
+  if (isAgentTable(tableName)) {
+    const realRows = await repo.getAll(sheet);
+    const realRecord = realRows.find((item) => item.id === id);
+    const seedRecord = !realRecord ? (SEED_DATA.agentes || []).find((item) => item.id === id) : null;
+    const sourceRecord = realRecord || seedRecord;
+
+    if (!sourceRecord) {
+      throw new NotFoundError(`No se encontro el registro ${id} en la tabla ${tableName}.`, {
+        context: {
+          tableName,
+          id,
+        },
+      });
+    }
+
+    const currentRows = await getStoredRows(tableName);
+    ensureAgentSafety(currentRows, id, null, 'remove');
+
+    if (realRecord) {
+      await repo.deleteRow(sheet, realRecord._rowIndex);
+      removeFromSeedData(tableName, id);
+      authService.clearAuthUserCache();
+      const { _rowIndex, ...deletedRecord } = realRecord;
+      await audit.log('delete', `config_${tableName}`, user, sanitizeAgentRow(deletedRecord));
+      return { status: 'removed', id };
+    }
+
+    const seedRemoved = removeFromSeedData(tableName, id);
+    if (seedRemoved) {
+      await audit.log('delete', `config_${tableName}`, user, sanitizeAgentRow(seedRemoved));
+      return { status: 'removed', id };
+    }
+  }
+
   const realRows = await repo.getAll(sheet);
   const realRecord = realRows.find((item) => item.id === id);
 
@@ -188,6 +765,7 @@ async function removeFromTable(tableName, id, user = 'system') {
     await repo.deleteRow(sheet, realRecord._rowIndex);
 
     removeFromSeedData(tableName, id);
+    authService.clearAuthUserCache();
 
     const { _rowIndex, ...deletedRecord } = realRecord;
     await audit.log('delete', `config_${tableName}`, user, deletedRecord);
@@ -200,7 +778,7 @@ async function removeFromTable(tableName, id, user = 'system') {
     return { status: 'removed', id };
   }
 
-  throw new NotFoundError(`No se encontró el registro ${id} en la tabla ${tableName}.`, {
+  throw new NotFoundError(`No se encontro el registro ${id} en la tabla ${tableName}.`, {
     context: {
       tableName,
       id,
@@ -211,22 +789,28 @@ async function removeFromTable(tableName, id, user = 'system') {
 async function importBatch(tableName, items, user = 'system') {
   assertTable(tableName);
   const { sheet, headers } = TABLES[tableName];
-  const results = [];
+  const records = [];
 
   for (const item of items) {
-    const id = `${tableName.toUpperCase().slice(0, 3)}-${Date.now()}-${counters[tableName]++}`;
-    const record = { id, ...item };
-    await repo.append(sheet, record, headers);
-    await audit.log('create', `config_${tableName}`, user, record);
-    results.push(record);
-
-    // Also add to seed data for in-memory mode
-    if (SEED_DATA[tableName]) {
-      SEED_DATA[tableName].push(record);
+    let normalizedItem = item;
+    if (tableName === 'bancos') {
+      normalizedItem = await normalizeBancoRecord(item, { requireOwner: true });
+    } else if (isAgentTable(tableName)) {
+      normalizedItem = normalizeAgentWriteInput(item, null, { requirePassword: true });
     }
+    records.push(createConfigRecord(tableName, normalizedItem));
   }
 
-  return results;
+  await repo.appendBatch(sheet, records.map((record) => headers.map((header) => record[header] ?? '')));
+  if (isAgentTable(tableName)) {
+    authService.clearAuthUserCache();
+  }
+  await audit.log('import', `config_${tableName}`, user, {
+    count: records.length,
+    items: records.map((record) => getImportLabel(tableName, record)),
+  });
+
+  return isAgentTable(tableName) ? records.map(sanitizeAgentRow) : records;
 }
 
 /**
@@ -250,17 +834,17 @@ async function getFullConfig() {
   });
 
   return {
-    agentes: agentes.map((a) => a.nombre),
+    agentes: getUniqueLabels(agentes, 'nombre'),
     agentes_full: agentes,
     categorias: categoriasMap,
     categorias_full: categorias,
-    bancos: bancos.map((b) => b.nombre),
+    bancos: getUniqueLabels(bancos, 'nombre'),
     bancos_full: bancos,
-    cajas: cajas.map((c) => c.nombre),
+    cajas: getUniqueLabels(cajas, 'nombre'),
     cajas_full: cajas,
-    usuarios: usuarios.map((u) => u.nombre),
+    usuarios: getUniqueLabels(usuarios, 'nombre'),
     usuarios_full: usuarios,
-    tipos_pago: tiposPago.map((t) => t.nombre),
+    tipos_pago: getUniqueLabels(tiposPago, 'nombre'),
     tipos_pago_full: tiposPago,
     timezone: 'America/Lima',
   };
@@ -268,7 +852,10 @@ async function getFullConfig() {
 
 module.exports = {
   getTable,
+  getConfigBancoById,
   addToTable,
+  updateInTable,
+  updateAgentPassword,
   removeFromTable,
   importBatch,
   getFullConfig,

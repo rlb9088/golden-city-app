@@ -66,7 +66,22 @@ test('removeFromTable borra la fila real de Sheets y audita el delete', async ()
             _rowIndex: 7,
             id: 'BK-99',
             nombre: 'Banco Demo',
-            propietario: 'Negocio',
+            propietario: '',
+            propietario_id: 'AG-1',
+          },
+        ];
+      }
+
+      if (sheetName === 'config_agentes') {
+        return [
+          {
+            _rowIndex: 2,
+            id: 'AG-1',
+            nombre: 'Administrador',
+            username: 'admin',
+            password_hash: 'hash-1',
+            role: 'admin',
+            activo: true,
           },
         ];
       }
@@ -94,12 +109,13 @@ test('removeFromTable borra la fila real de Sheets y audita el delete', async ()
     changes: {
       id: 'BK-99',
       nombre: 'Banco Demo',
-      propietario: 'Negocio',
+      propietario: '',
+      propietario_id: 'AG-1',
     },
   });
 });
 
-test('removeFromTable borra seed data cuando la hoja está vacía', async () => {
+test('removeFromTable borra seed data cuando la hoja esta vacia', async () => {
   let deleteRowCalled = false;
   let auditCall = null;
 
@@ -126,8 +142,40 @@ test('removeFromTable borra seed data cuando la hoja está vacía', async () => 
     changes: {
       id: 'AG-1',
       nombre: 'Agente 1',
+      username: 'agente1',
+      role: 'agent',
+      activo: true,
     },
   });
+});
+
+test('removeFromTable rechaza eliminar al unico admin activo', async () => {
+  const configService = loadConfigService({
+    getAll: async (sheetName) => {
+      if (sheetName === 'config_agentes') {
+        return [
+          {
+            _rowIndex: 2,
+            id: 'AG-1',
+            nombre: 'Administrador',
+            username: 'admin',
+            password_hash: 'hash-1',
+            role: 'admin',
+            activo: true,
+          },
+        ];
+      }
+
+      return [];
+    },
+    deleteRow: async () => ({ status: 'success' }),
+    auditLog: async () => ({ id: 'AUD-3' }),
+  });
+
+  await assert.rejects(
+    () => configService.removeFromTable('agentes', 'AG-1', 'tester'),
+    /sin un admin activo/i,
+  );
 });
 
 test('removeFromTable del controller propaga el usuario autenticado al service', async () => {

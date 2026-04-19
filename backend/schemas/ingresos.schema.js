@@ -2,14 +2,16 @@ const { z } = require('zod');
 
 const ingresoSchema = z.object({
   agente: z.string().min(1, 'Agente es requerido'),
-  banco: z.string().min(1, 'Banco es requerido'),
+  banco_id: z.string().min(1, 'Banco es requerido'),
+  banco: z.string().optional().default(''),
   monto: z.number().positive('Monto debe ser mayor a 0'),
   fecha_movimiento: z.string().min(1, 'Fecha del movimiento es requerida'),
 });
 
 const ingresoUpdateSchema = z.object({
   agente: z.string().min(1, 'Agente es requerido').optional(),
-  banco: z.string().min(1, 'Banco es requerido').optional(),
+  banco_id: z.string().min(1, 'Banco es requerido'),
+  banco: z.string().optional().default(''),
   monto: z.number().positive('Monto debe ser mayor a 0').optional(),
   fecha_movimiento: z.string().min(1, 'Fecha del movimiento es requerida').optional(),
 }).refine((data) => Object.values(data).some((value) => value !== undefined), {

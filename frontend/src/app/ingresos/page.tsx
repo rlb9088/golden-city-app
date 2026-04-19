@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState, useRef } from 'react';
-import { getConfig, createIngreso, getIngresos, updateIngreso, cancelIngreso, type IngresoRecord } from '@/lib/api';
+import { getConfig, createIngreso, getIngresos, getScopedBancos, updateIngreso, cancelIngreso, type ConfigAgent, type ConfigBanco, type IngresoRecord } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { formatCurrency, formatDateTime, getNowLima } from '@/lib/format';
 import AlertBanner from '@/components/AlertBanner';
@@ -21,11 +21,27 @@ function toDateTimeLocalValue(value: string) {
   return trimmed.length >= 16 ? trimmed.slice(0, 16) : trimmed;
 }
 
+function resolveAgentIdFromValue(agents: ConfigAgent[], value?: string) {
+  const trimmedValue = String(value ?? '').trim();
+  if (!trimmedValue) {
+    return '';
+  }
+
+  const normalizedValue = trimmedValue.toLowerCase();
+  return agents.find((agent) => (
+    agent.id === trimmedValue
+    || agent.nombre.trim().toLowerCase() === normalizedValue
+    || agent.username.trim().toLowerCase() === normalizedValue
+  ))?.id || '';
+}
+
 const PAGE_SIZE = 50;
 
 export default function IngresosPage() {
   const { isAdmin } = useAuth();
-  const [config, setConfig] = useState<{ bancos: string[]; agentes: string[] } | null>(null);
+  const [config, setConfig] = useState<{ bancos: string[]; bancos_full: ConfigBanco[]; agentes: string[]; agentes_full: ConfigAgent[] } | null>(null);
+  const [scopedBancos, setScopedBancos] = useState<ConfigBanco[]>([]);
+  const [editScopedBancos, setEditScopedBancos] = useState<ConfigBanco[]>([]);
   const [ingresos, setIngresos] = useState<IngresoRecord[]>([]);
   const [pagination, setPagination] = useState({ limit: PAGE_SIZE, offset: 0, total: 0, hasMore: false });
   const [loading, setLoading] = useState(true);
@@ -61,7 +77,7 @@ export default function IngresosPage() {
     setEditingIngreso(ingreso);
     setEditForm({
       agente: ingreso.agente || '',
-      banco: ingreso.banco || '',
+      banco: ingreso.banco_id || '',
       monto: String(ingreso.monto ?? ''),
       fecha_movimiento: toDateTimeLocalValue(ingreso.fecha_movimiento || ''),
     });
@@ -86,7 +102,7 @@ export default function IngresosPage() {
     if (!editingIngreso) return;
 
     const parsedMonto = parseFloat(editForm.monto);
-    if (!editForm.agente.trim() || !editForm.banco.trim() || !editForm.fecha_movimiento.trim() || !Number.isFinite(parsedMonto) || parsedMonto <= 0) {
+    if (!editForm.agente.trim() || !editForm.banco.trim() || !editScopedBancos.length || !editForm.fecha_movimiento.trim() || !Number.isFinite(parsedMonto) || parsedMonto <= 0) {
       setAlert({ type: 'error', message: 'Completa agente, banco, fecha y monto válidos' });
       return;
     }
@@ -95,7 +111,7 @@ export default function IngresosPage() {
       setActionLoading({ type: 'edit', id: editingIngreso.id });
       await updateIngreso(editingIngreso.id, {
         agente: editForm.agente.trim(),
-        banco: editForm.banco.trim(),
+        banco_id: editForm.banco.trim(),
         monto: parsedMonto,
         fecha_movimiento: editForm.fecha_movimiento.trim(),
       });
@@ -107,7 +123,7 @@ export default function IngresosPage() {
     } finally {
       setActionLoading(null);
     }
-  }, [closeEditModal, editForm, editingIngreso, refreshIngresos]);
+  }, [closeEditModal, editForm, editScopedBancos.length, editingIngreso, refreshIngresos]);
 
   const handleCancelIngreso = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -139,7 +155,7 @@ export default function IngresosPage() {
         setConfig(configRes);
         setIngresos(ingresosRes.items);
         setAgente((current) => current || configRes.agentes[0] || '');
-        setBanco((current) => current || configRes.bancos[0] || '');
+        setBanco('');
       } catch (err) {
         setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar datos' });
       } finally {
@@ -149,6 +165,101 @@ export default function IngresosPage() {
 
     void loadData();
   }, [loadIngresosPage]);
+
+  useEffect(() => {
+    if (!config) {
+      setScopedBancos([]);
+      return undefined;
+    }
+
+    const agentId = resolveAgentIdFromValue(config.agentes_full, agente);
+    if (!agentId) {
+      setScopedBancos([]);
+      setBanco('');
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const loadScopedBanks = async () => {
+      try {
+        const response = await getScopedBancos(agentId);
+        if (cancelled) {
+          return;
+        }
+
+        setScopedBancos(response.data);
+        setBanco((current) => {
+          if (response.data.some((bank) => bank.id === current)) {
+            return current;
+          }
+
+          return response.data[0]?.id || '';
+        });
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+        setScopedBancos([]);
+        setBanco('');
+        setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar bancos del agente' });
+      }
+    };
+
+    void loadScopedBanks();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [agente, config]);
+
+  useEffect(() => {
+    if (!config || !editingIngreso) {
+      setEditScopedBancos([]);
+      return undefined;
+    }
+
+    const agentId = resolveAgentIdFromValue(config.agentes_full, editForm.agente) || resolveAgentIdFromValue(config.agentes_full, editingIngreso.agente);
+    if (!agentId) {
+      setEditScopedBancos([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const loadEditScopedBanks = async () => {
+      try {
+        const response = await getScopedBancos(agentId);
+        if (cancelled) {
+          return;
+        }
+
+        setEditScopedBancos(response.data);
+        setEditForm((current) => {
+          if (response.data.some((bank) => bank.id === current.banco)) {
+            return current;
+          }
+
+          return {
+            ...current,
+            banco: response.data[0]?.id || '',
+          };
+        });
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+        setEditScopedBancos([]);
+        setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar bancos del ingreso' });
+      }
+    };
+
+    void loadEditScopedBanks();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [config, editForm.agente, editingIngreso]);
 
   const handlePreviousPage = useCallback(() => {
     if (pagination.offset === 0 || loading) {
@@ -172,13 +283,13 @@ export default function IngresosPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!monto || parseFloat(monto) <= 0) {
-      setAlert({ type: 'error', message: 'Ingresa un monto válido' });
+    if (!agente.trim() || !banco.trim() || !scopedBancos.length || !monto || parseFloat(monto) <= 0) {
+      setAlert({ type: 'error', message: 'Selecciona un agente y un banco válidos antes de registrar el ingreso' });
       return;
     }
     try {
       setSubmitting(true);
-      const response = await createIngreso({ agente, banco, monto: parseFloat(monto), fecha_movimiento: fechaMovimiento });
+      const response = await createIngreso({ agente, banco_id: banco, monto: parseFloat(monto), fecha_movimiento: fechaMovimiento });
       const warningMessage = response.warnings?.length
         ? `Ingreso registrado con observaciones: ${response.warnings.join(' • ')}`
         : '';
@@ -252,13 +363,20 @@ export default function IngresosPage() {
           <div className="field-group">
             <label className="label" htmlFor="agente-select">Agente</label>
             <select className="select" id="agente-select" value={agente} onChange={(e) => setAgente(e.target.value)}>
+              <option value="">Seleccione un agente</option>
               {config.agentes.map((a) => <option key={a} value={a}>{a}</option>)}
             </select>
           </div>
           <div className="field-group">
             <label className="label" htmlFor="banco-ingreso">Banco</label>
-            <select className="select" id="banco-ingreso" value={banco} onChange={(e) => setBanco(e.target.value)}>
-              {config.bancos.map((b) => <option key={b} value={b}>{b}</option>)}
+            <select className="select" id="banco-ingreso" value={banco} onChange={(e) => setBanco(e.target.value)} disabled={!agente.trim() || scopedBancos.length === 0}>
+              {!agente.trim() ? (
+                <option value="">Seleccione un agente primero</option>
+              ) : scopedBancos.length === 0 ? (
+                <option value="">No hay bancos disponibles</option>
+              ) : (
+                scopedBancos.map((b) => <option key={b.id} value={b.id}>{b.nombre}</option>)
+              )}
             </select>
           </div>
           <div className="field-group">
@@ -340,14 +458,21 @@ export default function IngresosPage() {
               <div className="modal-grid">
                 <label className="field-group">
                   <span className="label">Agente</span>
-                  <select className="select" value={editForm.agente} onChange={(e) => setEditForm((current) => ({ ...current, agente: e.target.value }))} required>
+                  <select className="select" value={editForm.agente} onChange={(e) => setEditForm((current) => ({ ...current, agente: e.target.value, banco: '' }))} required>
+                    <option value="">Seleccione un agente</option>
                     {config.agentes.map((option) => <option key={option} value={option}>{option}</option>)}
                   </select>
                 </label>
                 <label className="field-group">
                   <span className="label">Banco</span>
-                  <select className="select" value={editForm.banco} onChange={(e) => setEditForm((current) => ({ ...current, banco: e.target.value }))} required>
-                    {config.bancos.map((option) => <option key={option} value={option}>{option}</option>)}
+                  <select className="select" value={editForm.banco} onChange={(e) => setEditForm((current) => ({ ...current, banco: e.target.value }))} required disabled={!editForm.agente.trim() || editScopedBancos.length === 0}>
+                  {!editForm.agente.trim() ? (
+                    <option value="">Seleccione un agente primero</option>
+                  ) : editScopedBancos.length === 0 ? (
+                    <option value="">No hay bancos disponibles</option>
+                  ) : (
+                    editScopedBancos.map((option) => <option key={option.id} value={option.id}>{option.nombre}</option>)
+                  )}
                   </select>
                 </label>
                 <label className="field-group">

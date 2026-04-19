@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const bcrypt = require('bcrypt');
 
-function loadAuthService({ rows }) {
+function loadAuthService({ rows, getAllImpl } = {}) {
   const repoPath = require.resolve('../repositories/sheetsRepository');
   const servicePath = require.resolve('../services/auth.service');
 
@@ -14,7 +14,7 @@ function loadAuthService({ rows }) {
     filename: repoPath,
     loaded: true,
     exports: {
-      getAll: async () => rows,
+      getAll: getAllImpl || (async () => rows),
       append: async () => ({}),
       update: async () => ({}),
       deleteRow: async () => ({}),
@@ -51,7 +51,7 @@ function withEnv(overrides, fn) {
     });
 }
 
-test('login valida credenciales y genera JWT', async () => {
+test('login valida credenciales contra config_agentes y genera JWT', async () => {
   process.env.JWT_SECRET = 'test-secret';
   process.env.JWT_EXPIRES_IN = '15m';
   process.env.JWT_REFRESH_EXPIRES_IN = '7d';
@@ -60,17 +60,19 @@ test('login valida credenciales y genera JWT', async () => {
   const authService = loadAuthService({
     rows: [
       {
-        id: 'AUTH-1',
+        id: 'AG-1',
+        nombre: 'Administrador',
         username: 'admin',
         password_hash: passwordHash,
         role: 'admin',
-        nombre: 'Administrador',
+        activo: true,
       },
     ],
   });
 
   const result = await authService.login('admin', 'secret123');
 
+  assert.equal(result.user.userId, 'AG-1');
   assert.equal(result.user.username, 'admin');
   assert.equal(result.user.role, 'admin');
   assert.equal(result.user.nombre, 'Administrador');
@@ -80,11 +82,92 @@ test('login valida credenciales y genera JWT', async () => {
 
   const session = authService.verifyToken(result.accessToken);
   assert.deepStrictEqual(session, {
-    userId: 'AUTH-1',
+    userId: 'AG-1',
     username: 'admin',
     role: 'admin',
     nombre: 'Administrador',
   });
+});
+
+test('login permite el admin bootstrap sin esperar a Google Sheets', async () => {
+  process.env.JWT_SECRET = 'test-secret';
+  process.env.JWT_EXPIRES_IN = '15m';
+  process.env.JWT_REFRESH_EXPIRES_IN = '7d';
+  process.env.AUTH_BOOTSTRAP_ADMIN_USERNAME = 'admin';
+  process.env.AUTH_BOOTSTRAP_ADMIN_PASSWORD = 'admin123';
+
+  let getAllCalled = false;
+  const authService = loadAuthService({
+    getAllImpl: async () => {
+      getAllCalled = true;
+      throw new Error('Sheets no deberia consultarse para bootstrap');
+    },
+  });
+
+  const result = await authService.login('admin', 'admin123');
+
+  assert.equal(result.user.userId, 'AUTH-ADMIN');
+  assert.equal(result.user.username, 'admin');
+  assert.equal(result.user.role, 'admin');
+  assert.equal(result.user.nombre, 'Administrador');
+  assert.equal(getAllCalled, false);
+});
+
+test('login reutiliza la cache si Google Sheets falla despues de una lectura exitosa', async () => {
+  process.env.JWT_SECRET = 'test-secret';
+  process.env.JWT_EXPIRES_IN = '15m';
+  process.env.JWT_REFRESH_EXPIRES_IN = '7d';
+
+  const passwordHash = await bcrypt.hash('secret123', 10);
+  let getAllCalls = 0;
+  const rows = [
+    {
+      id: 'AG-1',
+      nombre: 'Administrador',
+      username: 'admin',
+      password_hash: passwordHash,
+      role: 'admin',
+      activo: true,
+    },
+  ];
+
+  const authService = loadAuthService({
+    getAllImpl: async () => {
+      getAllCalls += 1;
+      if (getAllCalls === 1) {
+        return rows;
+      }
+
+      throw new Error('Quota exceeded');
+    },
+  });
+
+  const firstResult = await authService.login('admin', 'secret123');
+  const secondResult = await authService.login('admin', 'secret123');
+
+  assert.equal(firstResult.user.userId, 'AG-1');
+  assert.equal(secondResult.user.userId, 'AG-1');
+  assert.equal(getAllCalls, 1);
+});
+
+test('login rechaza usuarios inactivos', async () => {
+  process.env.JWT_SECRET = 'test-secret';
+
+  const passwordHash = await bcrypt.hash('secret123', 10);
+  const authService = loadAuthService({
+    rows: [
+      {
+        id: 'AG-1',
+        nombre: 'Agente Bloqueado',
+        username: 'blocked',
+        password_hash: passwordHash,
+        role: 'agent',
+        activo: false,
+      },
+    ],
+  });
+
+  await assert.rejects(authService.login('blocked', 'secret123'), /usuario esta inactivo/i);
 });
 
 test('refresh genera un nuevo access token para un refresh token valido', async () => {
@@ -96,11 +179,12 @@ test('refresh genera un nuevo access token para un refresh token valido', async 
   const authService = loadAuthService({
     rows: [
       {
-        id: 'AUTH-1',
+        id: 'AG-1',
+        nombre: 'Administrador',
         username: 'admin',
         password_hash: passwordHash,
         role: 'admin',
-        nombre: 'Administrador',
+        activo: true,
       },
     ],
   });
@@ -110,7 +194,7 @@ test('refresh genera un nuevo access token para un refresh token valido', async 
 
   assert.ok(refreshResult.accessToken);
   assert.ok(refreshResult.refreshToken);
-  assert.equal(refreshResult.user.userId, 'AUTH-1');
+  assert.equal(refreshResult.user.userId, 'AG-1');
   assert.equal(refreshResult.expiresIn, '15m');
 });
 
@@ -123,7 +207,7 @@ test('refresh rechaza tokens invalidos', async () => {
   await assert.rejects(authService.refresh('nope'), /Refresh token invalido/);
 });
 
-test('ensureAuthSheetSeed prepara usuarios bootstrap cuando la hoja esta vacia', async () => {
+test('ensureAuthSheetSeed prepara un admin bootstrap cuando la hoja esta vacia', async () => {
   const writes = [];
   const repoPath = require.resolve('../repositories/sheetsRepository');
   const servicePath = require.resolve('../services/auth.service');
@@ -147,13 +231,18 @@ test('ensureAuthSheetSeed prepara usuarios bootstrap cuando la hoja esta vacia',
     },
   };
 
+  process.env.JWT_SECRET = 'test-secret';
+  process.env.AUTH_BOOTSTRAP_ADMIN_PASSWORD = 'admin-strong-secret';
+
   const authService = require('../services/auth.service');
   const seeded = await authService.ensureAuthSheetSeed();
 
   assert.equal(seeded, true);
-  assert.equal(writes.length, 2);
-  assert.equal(writes[0].sheetName, 'config_auth_users');
-  assert.deepStrictEqual(writes[0].headers, ['id', 'username', 'password_hash', 'role', 'nombre']);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].sheetName, 'config_agentes');
+  assert.deepStrictEqual(writes[0].headers, ['id', 'nombre', 'username', 'password_hash', 'role', 'activo']);
+  assert.equal(writes[0].data.role, 'admin');
+  assert.equal(writes[0].data.activo, true);
 });
 
 test('ensureAuthSheetSeed falla en produccion si falta JWT_SECRET', async () => {
@@ -162,16 +251,16 @@ test('ensureAuthSheetSeed falla en produccion si falta JWT_SECRET', async () => 
     JWT_SECRET: undefined,
     AUTH_JWT_SECRET: undefined,
     AUTH_BOOTSTRAP_ADMIN_PASSWORD: 'admin-strong-secret',
-    AUTH_BOOTSTRAP_AGENT_PASSWORD: 'agent-strong-secret',
   }, async () => {
     const authService = loadAuthService({
       rows: [
         {
-          id: 'AUTH-1',
+          id: 'AG-1',
           username: 'admin',
           password_hash: await bcrypt.hash('secret123', 10),
           role: 'admin',
           nombre: 'Administrador',
+          activo: true,
         },
       ],
     });
@@ -180,22 +269,22 @@ test('ensureAuthSheetSeed falla en produccion si falta JWT_SECRET', async () => 
   });
 });
 
-test('ensureAuthSheetSeed falla en produccion si faltan passwords bootstrap', async () => {
+test('ensureAuthSheetSeed falla en produccion si falta password de bootstrap', async () => {
   await withEnv({
     NODE_ENV: 'production',
     JWT_SECRET: 'production-secret',
     AUTH_JWT_SECRET: undefined,
     AUTH_BOOTSTRAP_ADMIN_PASSWORD: undefined,
-    AUTH_BOOTSTRAP_AGENT_PASSWORD: undefined,
   }, async () => {
     const authService = loadAuthService({
       rows: [
         {
-          id: 'AUTH-1',
+          id: 'AG-1',
           username: 'admin',
           password_hash: await bcrypt.hash('secret123', 10),
           role: 'admin',
           nombre: 'Administrador',
+          activo: true,
         },
       ],
     });
@@ -204,7 +293,7 @@ test('ensureAuthSheetSeed falla en produccion si faltan passwords bootstrap', as
   });
 });
 
-test('en desarrollo se registran warnings y se usan fallbacks inseguros', async () => {
+test('en desarrollo se registran warnings y se usa bootstrap inseguro', async () => {
   const warnings = [];
   const originalWarn = console.warn;
 
@@ -213,7 +302,6 @@ test('en desarrollo se registran warnings y se usan fallbacks inseguros', async 
     JWT_SECRET: undefined,
     AUTH_JWT_SECRET: undefined,
     AUTH_BOOTSTRAP_ADMIN_PASSWORD: undefined,
-    AUTH_BOOTSTRAP_AGENT_PASSWORD: undefined,
   }, async () => {
     console.warn = (...args) => {
       warnings.push(args.join(' '));
@@ -225,7 +313,7 @@ test('en desarrollo se registran warnings y se usan fallbacks inseguros', async 
 
       assert.equal(seeded, true);
       assert.ok(warnings.some((message) => message.includes('JWT_SECRET not defined')));
-      assert.ok(warnings.some((message) => message.includes('Bootstrap passwords not defined')));
+      assert.ok(warnings.some((message) => message.includes('Bootstrap admin password not defined')));
     } finally {
       console.warn = originalWarn;
     }

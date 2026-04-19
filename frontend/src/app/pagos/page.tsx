@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAuth } from '@/lib/auth-context';
-import { getConfig, createPago, getPagos, updatePago, cancelPago, type PagoRecord } from '@/lib/api';
+import { getConfig, createPago, getPagos, getScopedBancos, updatePago, cancelPago, type ConfigAgent, type ConfigBanco, type PagoRecord } from '@/lib/api';
 import { formatCurrency, formatDateTime } from '@/lib/format';
 import AlertBanner from '@/components/AlertBanner';
 import PaginationControls from '@/components/PaginationControls';
@@ -53,17 +53,69 @@ function isPagoAnulado(pago: PagoRecord) {
   return String(pago.estado ?? '').trim().toLowerCase() === 'anulado';
 }
 
+function resolveBancoValue(bancos: ConfigBanco[], bancoId?: string, bancoNombre?: string) {
+  const trimmedBancoId = String(bancoId ?? '').trim();
+  if (trimmedBancoId) {
+    const matchedById = bancos.find((banco) => banco.id === trimmedBancoId);
+    if (matchedById) {
+      return matchedById.id;
+    }
+  }
+
+  const trimmedNombre = String(bancoNombre ?? '').trim().toLowerCase();
+  if (!trimmedNombre) {
+    return '';
+  }
+
+  return bancos.find((banco) => banco.nombre.trim().toLowerCase() === trimmedNombre)?.id || '';
+}
+
+function resolveSelectedBancoId(bancos: ConfigBanco[], currentValue?: string) {
+  const resolved = resolveBancoValue(bancos, currentValue, currentValue);
+  return resolved || bancos[0]?.id || '';
+}
+
+function resolveAgentIdFromValue(agents: ConfigAgent[], value?: string) {
+  const trimmedValue = String(value ?? '').trim();
+  if (!trimmedValue) {
+    return '';
+  }
+
+  const normalizedValue = trimmedValue.toLowerCase();
+  return agents.find((agent) => (
+    agent.id === trimmedValue
+    || agent.nombre.trim().toLowerCase() === normalizedValue
+    || agent.username.trim().toLowerCase() === normalizedValue
+  ))?.id || '';
+}
+
+function resolveAgentNameFromId(agents: ConfigAgent[], agentId?: string, fallback = '') {
+  const trimmedAgentId = String(agentId ?? '').trim();
+  if (!trimmedAgentId) {
+    return fallback;
+  }
+
+  return agents.find((agent) => agent.id === trimmedAgentId)?.nombre || fallback || trimmedAgentId;
+}
+
+const USUARIO_SUGGESTION_LIMIT = 20;
+
 const PAGE_SIZE = 50;
 
 export default function PagosPage() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const [config, setConfig] = useState<{
     bancos: string[];
+    bancos_full: ConfigBanco[];
     agentes: string[];
+    agentes_full: ConfigAgent[];
     tipos_pago: string[];
     cajas: string[];
     usuarios: string[];
   } | null>(null);
+  const [selectedPagoAgentId, setSelectedPagoAgentId] = useState('');
+  const [scopedBancos, setScopedBancos] = useState<ConfigBanco[]>([]);
+  const [editScopedBancos, setEditScopedBancos] = useState<ConfigBanco[]>([]);
   const [pagos, setPagos] = useState<PagoRecord[]>([]);
   const [totalPagos, setTotalPagos] = useState(0);
   const [pagination, setPagination] = useState({ limit: PAGE_SIZE, offset: 0, total: 0, hasMore: false });
@@ -88,14 +140,16 @@ export default function PagosPage() {
   const [tipo, setTipo] = useState('');
 
   // OCR specific state
-  const [comprobanteUrl, setComprobanteUrl] = useState('');
+  const [comprobanteBase64, setComprobanteBase64] = useState('');
   const [fechaComprobante, setFechaComprobante] = useState('');
   const [ocrWarning, setOcrWarning] = useState<string | null>(null);
   const [ocrMonto, setOcrMonto] = useState<number | null>(null);
   const [ocrFecha, setOcrFecha] = useState<string | null>(null);
+  const [receiptResetToken, setReceiptResetToken] = useState(0);
   const [fechaWarning, setFechaWarning] = useState<string | null>(null);
   const [usuarioWarning, setUsuarioWarning] = useState<string | null>(null);
   const [editingPago, setEditingPago] = useState<PagoRecord | null>(null);
+  const [editingAgentId, setEditingAgentId] = useState('');
   const [editForm, setEditForm] = useState({
     usuario: '',
     caja: '',
@@ -109,9 +163,16 @@ export default function PagosPage() {
   const [cancelReason, setCancelReason] = useState('');
 
   const firstInputRef = useRef<HTMLInputElement>(null);
+  const usuarioComboboxRef = useRef<HTMLDivElement>(null);
   const hasLoadedInitialPagos = useRef(false);
   const skipFirstFilterFetch = useRef(true);
   const currentPageRef = useRef(0);
+  const suppressUsuarioSuggestionsRef = useRef(false);
+  const scopedBankOwnerRef = useRef('');
+  const editScopedBankOwnerRef = useRef('');
+  const [usuarioSuggestions, setUsuarioSuggestions] = useState<string[]>([]);
+  const [usuarioDropdownOpen, setUsuarioDropdownOpen] = useState(false);
+  const [usuarioActiveIndex, setUsuarioActiveIndex] = useState(-1);
 
   const loadPagosPage = useCallback(async (page: number, nextFilters: PagoFilters) => {
     const safePage = Math.max(page, 0);
@@ -146,8 +207,9 @@ export default function PagosPage() {
         setTotalPagos(pagosRes.pagination.total);
         hasLoadedInitialPagos.current = true;
         skipFirstFilterFetch.current = true;
+        setSelectedPagoAgentId((current) => current || (isAdmin ? configRes.agentes_full[0]?.id || '' : user?.id || ''));
         setCaja((current) => current || configRes.cajas[0] || '');
-        setBanco((current) => current || configRes.bancos[0] || '');
+        setBanco((current) => resolveSelectedBancoId(configRes.bancos_full, current));
         setTipo((current) => current || configRes.tipos_pago[0] || '');
       } catch (err) {
         setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar datos' });
@@ -158,13 +220,145 @@ export default function PagosPage() {
     };
 
     void loadData();
-  }, [loadPagosPage]);
+  }, [isAdmin, loadPagosPage, user?.id]);
 
   useEffect(() => {
     if (!loading && firstInputRef.current) {
       firstInputRef.current.focus();
     }
   }, [loading]);
+
+  useEffect(() => {
+    if (!config || !user) {
+      return undefined;
+    }
+
+    const effectiveAgentId = isAdmin ? selectedPagoAgentId : user.id;
+    if (!effectiveAgentId) {
+      setScopedBancos([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const loadScopedBanks = async () => {
+      try {
+        const response = await getScopedBancos(effectiveAgentId);
+        if (cancelled) {
+          return;
+        }
+
+        setScopedBancos(response.data);
+        setBanco((current) => resolveSelectedBancoId(response.data, current));
+        scopedBankOwnerRef.current = effectiveAgentId;
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+        setScopedBancos([]);
+        setBanco('');
+        setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar bancos del agente' });
+      }
+    };
+
+    void loadScopedBanks();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [config, isAdmin, selectedPagoAgentId, user]);
+
+  useEffect(() => {
+    if (!config || !editingPago) {
+      setEditScopedBancos([]);
+      return undefined;
+    }
+
+    const effectiveAgentId = editingAgentId || resolveAgentIdFromValue(config.agentes_full || [], editingPago.agente) || '';
+    if (!effectiveAgentId) {
+      setEditScopedBancos([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const loadEditScopedBanks = async () => {
+      try {
+        const response = await getScopedBancos(effectiveAgentId);
+        if (cancelled) {
+          return;
+        }
+
+        setEditScopedBancos(response.data);
+        setEditForm((current) => ({
+          ...current,
+          banco: resolveSelectedBancoId(response.data, current.banco),
+        }));
+        editScopedBankOwnerRef.current = effectiveAgentId;
+      } catch (err) {
+        if (cancelled) {
+          return;
+        }
+        setEditScopedBancos([]);
+        setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar bancos del pago' });
+      }
+    };
+
+    void loadEditScopedBanks();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [config, editingAgentId, editingPago]);
+
+  useEffect(() => {
+    if (!config) {
+      setUsuarioSuggestions([]);
+      setUsuarioDropdownOpen(false);
+      setUsuarioActiveIndex(-1);
+      return;
+    }
+
+    if (suppressUsuarioSuggestionsRef.current) {
+      suppressUsuarioSuggestionsRef.current = false;
+      setUsuarioSuggestions([]);
+      setUsuarioDropdownOpen(false);
+      setUsuarioActiveIndex(-1);
+      return;
+    }
+
+    const trimmedQuery = usuario.trim();
+    if (trimmedQuery.length < 2) {
+      setUsuarioSuggestions([]);
+      setUsuarioDropdownOpen(false);
+      setUsuarioActiveIndex(-1);
+      return;
+    }
+
+    const nextSuggestions = config.usuarios
+      .filter((item) => item.toLowerCase().includes(trimmedQuery.toLowerCase()))
+      .slice(0, USUARIO_SUGGESTION_LIMIT);
+
+    setUsuarioSuggestions(nextSuggestions);
+    setUsuarioDropdownOpen(nextSuggestions.length > 0);
+    setUsuarioActiveIndex(nextSuggestions.length > 0 ? 0 : -1);
+  }, [config, usuario]);
+
+  useEffect(() => {
+    if (!usuarioDropdownOpen) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const targetNode = event.target as Node | null;
+      if (usuarioComboboxRef.current && targetNode && !usuarioComboboxRef.current.contains(targetNode)) {
+        setUsuarioDropdownOpen(false);
+        setUsuarioActiveIndex(-1);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [usuarioDropdownOpen]);
 
   useEffect(() => {
     if (!hasLoadedInitialPagos.current || !config) {
@@ -209,17 +403,19 @@ export default function PagosPage() {
   }, []);
 
   const openEditModal = useCallback((pago: PagoRecord) => {
+    const resolvedAgentId = resolveAgentIdFromValue(config?.agentes_full || [], pago.agente);
     setEditingPago(pago);
+    setEditingAgentId(resolvedAgentId);
     setEditForm({
       usuario: pago.usuario || '',
       caja: pago.caja || '',
-      banco: pago.banco || '',
+      banco: resolveBancoValue(config?.bancos_full || [], pago.banco_id, pago.banco),
       monto: toAmountString(pago.monto),
       tipo: pago.tipo || '',
       comprobante_url: pago.comprobante_url || '',
       fecha_comprobante: toDateTimeLocalValue(pago.fecha_comprobante || ''),
     });
-  }, []);
+  }, [config]);
 
   const closeEditModal = useCallback(() => {
     setEditingPago(null);
@@ -263,7 +459,9 @@ export default function PagosPage() {
     e.preventDefault();
     if (!editingPago) return;
 
-    if (!editForm.usuario.trim() || !editForm.caja.trim() || !editForm.banco.trim() || !editForm.tipo.trim()) {
+    const resolvedBancoId = resolveSelectedBancoId(editScopedBancos, editForm.banco);
+
+    if (!editForm.usuario.trim() || !editForm.caja.trim() || !resolvedBancoId || !editForm.tipo.trim()) {
       setAlert({ type: 'error', message: 'Completa los campos obligatorios antes de guardar la edición' });
       return;
     }
@@ -279,7 +477,7 @@ export default function PagosPage() {
       await updatePago(editingPago.id, {
         usuario: editForm.usuario.trim(),
         caja: editForm.caja.trim(),
-        banco: editForm.banco.trim(),
+        banco_id: resolvedBancoId,
         monto: parsedAmount,
         tipo: editForm.tipo.trim(),
         comprobante_url: editForm.comprobante_url.trim(),
@@ -293,7 +491,7 @@ export default function PagosPage() {
     } finally {
       setActionLoading(null);
     }
-  }, [closeEditModal, editForm, editingPago, refreshPagos]);
+  }, [closeEditModal, editForm, editScopedBancos, editingPago, refreshPagos]);
 
   const handleCancelPago = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -337,6 +535,59 @@ export default function PagosPage() {
     setAlert({ type: 'warning', message });
   }, [config]);
 
+  const selectUsuarioSuggestion = useCallback((value: string) => {
+    suppressUsuarioSuggestionsRef.current = true;
+    setUsuario(value);
+    setUsuarioWarning(null);
+    setUsuarioSuggestions([]);
+    setUsuarioDropdownOpen(false);
+    setUsuarioActiveIndex(-1);
+  }, []);
+
+  const handleUsuarioKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (usuarioSuggestions.length === 0) {
+      if (event.key === 'Escape') {
+        setUsuarioDropdownOpen(false);
+      }
+      return;
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setUsuarioDropdownOpen(true);
+      setUsuarioActiveIndex((current) => (current + 1) % usuarioSuggestions.length);
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setUsuarioDropdownOpen(true);
+      setUsuarioActiveIndex((current) => (current <= 0 ? usuarioSuggestions.length - 1 : current - 1));
+      return;
+    }
+
+    if (event.key === 'Enter' && usuarioDropdownOpen && usuarioActiveIndex >= 0) {
+      event.preventDefault();
+      const selectedValue = usuarioSuggestions[usuarioActiveIndex];
+      if (selectedValue) {
+        selectUsuarioSuggestion(selectedValue);
+      }
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setUsuarioDropdownOpen(false);
+      setUsuarioActiveIndex(-1);
+    }
+  }, [selectUsuarioSuggestion, usuarioActiveIndex, usuarioDropdownOpen, usuarioSuggestions]);
+
+  const handleUsuarioFocus = useCallback(() => {
+    if (usuario.trim().length >= 2 && usuarioSuggestions.length > 0) {
+      setUsuarioDropdownOpen(true);
+    }
+  }, [usuario, usuarioSuggestions.length]);
+
   const validateFechaAgainstOCR = useCallback((nextFecha: string, shouldAlert = false, detectedFecha?: string | null) => {
     const sourceFecha = detectedFecha ?? ocrFecha;
     if (!sourceFecha) {
@@ -361,8 +612,11 @@ export default function PagosPage() {
 
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!usuario.trim() || !monto || parseFloat(monto) <= 0) {
-      setAlert({ type: 'error', message: 'Completa usuario y monto válido' });
+    const resolvedBancoId = resolveSelectedBancoId(scopedBancos, banco);
+    const parsedAmount = parseFloat(monto);
+
+    if (!usuario.trim() || !resolvedBancoId || !monto || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      setAlert({ type: 'error', message: 'Completa usuario, banco y monto válido' });
       return;
     }
 
@@ -371,10 +625,11 @@ export default function PagosPage() {
       const response = await createPago({
         usuario: usuario.trim(),
         caja,
-        banco,
-        monto: parseFloat(monto),
+        banco_id: resolvedBancoId,
+        agente_id: isAdmin ? selectedPagoAgentId : undefined,
+        monto: parsedAmount,
         tipo,
-        comprobante_url: comprobanteUrl,
+        comprobante_base64: comprobanteBase64,
         fecha_comprobante: fechaComprobante,
       });
       const warningMessage = response.warnings?.length
@@ -383,7 +638,7 @@ export default function PagosPage() {
       setAlert(
         warningMessage
           ? { type: 'warning', message: warningMessage }
-          : { type: 'success', message: `Pago de ${formatCurrency(parseFloat(monto))} registrado` },
+          : { type: 'success', message: `Pago de ${formatCurrency(parsedAmount)} registrado` },
       );
       setUsuario('');
       setMonto('');
@@ -392,8 +647,9 @@ export default function PagosPage() {
       setOcrWarning(null);
       setFechaWarning(null);
       setUsuarioWarning(null);
-      setComprobanteUrl('');
+      setComprobanteBase64('');
       setFechaComprobante('');
+      setReceiptResetToken((current) => current + 1);
       firstInputRef.current?.focus();
       currentPageRef.current = 0;
       setPagination((current) => ({ ...current, offset: 0 }));
@@ -403,10 +659,10 @@ export default function PagosPage() {
     } finally {
       setSubmitting(false);
     }
-  }, [banco, caja, comprobanteUrl, fechaComprobante, monto, refreshPagos, tipo, usuario]);
+  }, [banco, caja, comprobanteBase64, fechaComprobante, isAdmin, monto, refreshPagos, scopedBancos, selectedPagoAgentId, tipo, usuario]);
 
-  const handleOCR = (data: { monto: number | null; fecha: string | null; imageUrl: string }) => {
-    setComprobanteUrl(data.imageUrl);
+  const handleOCR = (data: { monto: number | null; fecha: string | null; comprobanteBase64: string }) => {
+    setComprobanteBase64(data.comprobanteBase64);
     setOcrFecha(data.fecha);
     if (data.fecha) {
       const nextFecha = toDateTimeLocalValue(data.fecha);
@@ -428,7 +684,7 @@ export default function PagosPage() {
           setOcrWarning(null);
         }
       }
-    } else if (data.imageUrl === '') {
+    } else if (data.comprobanteBase64 === '') {
       setOcrMonto(null);
       setOcrFecha(null);
       setOcrWarning(null);
@@ -491,50 +747,113 @@ export default function PagosPage() {
         <ReceiptUploader
           onOCRComplete={handleOCR}
           onError={(msg) => setAlert({ type: 'error', message: msg })}
+          resetToken={receiptResetToken}
         />
 
         <div className="form-grid">
           <div className="field-group">
             <label className="label" htmlFor="usuario">Usuario</label>
+            <div ref={usuarioComboboxRef} className="combobox">
+              <input
+                ref={firstInputRef}
+                className="input"
+                id="usuario"
+                value={usuario}
+                onChange={(e) => {
+                  setUsuario(e.target.value);
+                  if (usuarioWarning) setUsuarioWarning(null);
+                }}
+                onBlur={(e) => validateUsuario(e.target.value)}
+                onFocus={handleUsuarioFocus}
+                onKeyDown={handleUsuarioKeyDown}
+                placeholder="Nombre del usuario"
+                required
+                autoComplete="off"
+                aria-autocomplete="list"
+                aria-controls="usuarios-listbox"
+                aria-expanded={usuarioDropdownOpen && usuarioSuggestions.length > 0}
+                aria-activedescendant={
+                  usuarioDropdownOpen && usuarioActiveIndex >= 0 ? `usuarios-option-${usuarioActiveIndex}` : undefined
+                }
+                role="combobox"
+                tabIndex={1}
+              />
+              {usuarioDropdownOpen && usuarioSuggestions.length > 0 && (
+                <ul className="combobox-list" id="usuarios-listbox" role="listbox">
+                  {usuarioSuggestions.map((item, index) => (
+                    <li
+                      key={item}
+                      id={`usuarios-option-${index}`}
+                      className={index === usuarioActiveIndex ? 'combobox-item combobox-item--active' : 'combobox-item'}
+                      role="option"
+                      aria-selected={index === usuarioActiveIndex}
+                      onPointerDown={(event) => {
+                        event.preventDefault();
+                        selectUsuarioSuggestion(item);
+                      }}
+                      onMouseEnter={() => setUsuarioActiveIndex(index)}
+                    >
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          {usuarioWarning && (
+            <div style={{ color: 'var(--accent-orange)', fontSize: '0.85rem', marginTop: '4px', fontWeight: 500 }}>
+              ⚠️ {usuarioWarning}
+            </div>
+          )}
+        </div>
+
+        <div className="field-group">
+          <label className="label" htmlFor="agente-select">
+            Agente
+          </label>
+          {isAdmin ? (
+            <select
+              className="select"
+              id="agente-select"
+              value={selectedPagoAgentId}
+              onChange={(e) => setSelectedPagoAgentId(e.target.value)}
+              tabIndex={2}
+            >
+              {(config.agentes_full || [])
+                .filter((agenteOption) => agenteOption.activo)
+                .map((agenteOption) => (
+                  <option key={agenteOption.id} value={agenteOption.id}>
+                    {agenteOption.nombre}
+                  </option>
+                ))}
+            </select>
+          ) : (
             <input
-              ref={firstInputRef}
               className="input"
-              id="usuario"
-              value={usuario}
-              onChange={(e) => {
-                setUsuario(e.target.value);
-                if (usuarioWarning) setUsuarioWarning(null);
-              }}
-              onBlur={(e) => validateUsuario(e.target.value)}
-              placeholder="Nombre del usuario"
-              required
-              autoComplete="off"
-              list="usuarios-list"
-              tabIndex={1}
+              id="agente-select"
+              value={resolveAgentNameFromId(config.agentes_full || [], user?.id, user?.nombre || user?.username || '')}
+              readOnly
+              tabIndex={2}
             />
-            <datalist id="usuarios-list">
-              {config.usuarios.map((item) => <option key={item} value={item} />)}
-            </datalist>
-            {usuarioWarning && (
-              <div style={{ color: 'var(--accent-orange)', fontSize: '0.85rem', marginTop: '4px', fontWeight: 500 }}>
-                ⚠️ {usuarioWarning}
-              </div>
+          )}
+        </div>
+
+        <div className="field-group">
+          <label className="label" htmlFor="caja-select">Caja</label>
+          <select className="select" id="caja-select" value={caja} onChange={(e) => setCaja(e.target.value)} tabIndex={3}>
+            {config.cajas.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+
+        <div className="field-group">
+          <label className="label" htmlFor="banco-select">Banco</label>
+          <select className="select" id="banco-select" value={banco} onChange={(e) => setBanco(e.target.value)} tabIndex={4}>
+            {scopedBancos.length === 0 ? (
+              <option value="">No hay bancos disponibles</option>
+            ) : (
+              scopedBancos.map((b) => <option key={b.id} value={b.id}>{b.nombre}</option>)
             )}
-          </div>
-
-          <div className="field-group">
-            <label className="label" htmlFor="caja-select">Caja</label>
-            <select className="select" id="caja-select" value={caja} onChange={(e) => setCaja(e.target.value)} tabIndex={2}>
-              {config.cajas.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-
-          <div className="field-group">
-            <label className="label" htmlFor="banco-select">Banco</label>
-            <select className="select" id="banco-select" value={banco} onChange={(e) => setBanco(e.target.value)} tabIndex={3}>
-              {config.bancos.map((b) => <option key={b} value={b}>{b}</option>)}
-            </select>
-          </div>
+          </select>
+        </div>
 
           <div className="field-group">
             <label className="label" htmlFor="monto-input">Monto (S/)</label>
@@ -561,7 +880,7 @@ export default function PagosPage() {
               }}
               placeholder="0.00"
               required
-              tabIndex={4}
+              tabIndex={5}
             />
             {ocrWarning && (
               <div style={{ color: 'var(--accent-orange)', fontSize: '0.85rem', marginTop: '4px', fontWeight: 500 }}>
@@ -582,7 +901,7 @@ export default function PagosPage() {
                 setFechaComprobante(nextFecha);
                 validateFechaAgainstOCR(nextFecha, true);
               }}
-              tabIndex={5}
+              tabIndex={6}
             />
             {fechaComprobante && (
               <div style={{ color: 'var(--text-muted)', fontSize: '0.80rem', marginTop: '4px' }}>
@@ -598,7 +917,7 @@ export default function PagosPage() {
 
           <div className="field-group">
             <label className="label" htmlFor="tipo-select">Tipo de Pago</label>
-            <select className="select" id="tipo-select" value={tipo} onChange={(e) => setTipo(e.target.value)} tabIndex={6}>
+            <select className="select" id="tipo-select" value={tipo} onChange={(e) => setTipo(e.target.value)} tabIndex={7}>
               {config.tipos_pago.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
@@ -610,7 +929,7 @@ export default function PagosPage() {
             type="submit"
             disabled={submitting || loading || !config}
             id="submit-pago"
-            tabIndex={7}
+            tabIndex={8}
           >
             {submitting ? '⏳ Registrando...' : '✅ Registrar Pago'}
           </button>
@@ -724,7 +1043,7 @@ export default function PagosPage() {
             <table className="table" id="pagos-table">
               <thead>
                 <tr>
-                  <th style={{ width: '30px' }}></th>
+                  <th style={{ width: '140px' }}>Comprobante</th>
                   <th>Fecha Registro</th>
                   <th>Fecha Comprobante</th>
                   <th>Usuario</th>
@@ -739,7 +1058,15 @@ export default function PagosPage() {
               <tbody>
                 {pagos.map((p, i) => (
                   <tr key={p.id || i} className={isPagoAnulado(p) ? 'pago-row pago-row--anulado' : 'pago-row'}>
-                    <td>{p.comprobante_url ? '📸' : ''}</td>
+                    <td>
+                      {p.comprobante_url ? (
+                        <a href={p.comprobante_url} target="_blank" rel="noreferrer" className="link">
+                          Ver comprobante
+                        </a>
+                      ) : (
+                        <span className="text-muted">—</span>
+                      )}
+                    </td>
                     <td className="text-muted">{formatDateTime(p.fecha_registro || '')}</td>
                     <td style={{ color: p.fecha_comprobante ? 'var(--accent-gold)' : 'inherit' }}>
                       {p.fecha_comprobante ? p.fecha_comprobante : <span className="text-muted">-</span>}
@@ -851,11 +1178,15 @@ export default function PagosPage() {
                     onChange={(e) => setEditForm((current) => ({ ...current, banco: e.target.value }))}
                     required
                   >
-                    {config.bancos.map((bancoOption) => (
-                      <option key={bancoOption} value={bancoOption}>
-                        {bancoOption}
-                      </option>
-                    ))}
+                    {editScopedBancos.length === 0 ? (
+                      <option value="">No hay bancos disponibles</option>
+                    ) : (
+                      editScopedBancos.map((bancoOption) => (
+                        <option key={bancoOption.id} value={bancoOption.id}>
+                          {bancoOption.nombre}
+                        </option>
+                      ))
+                    )}
                   </select>
                 </label>
                 <label className="field-group">

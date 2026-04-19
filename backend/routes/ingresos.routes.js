@@ -6,7 +6,7 @@ const { verifyToken, requireAuth, requireAdmin } = require('../middleware/auth.m
 const { ingresoSchema, ingresoUpdateSchema, ingresoCancelSchema } = require('../schemas/ingresos.schema');
 
 router.post('/', verifyToken, requireAdmin, validate(ingresoSchema), controller.create);
-router.get('/', verifyToken, requireAuth, controller.getAll);
+router.get('/', verifyToken, requireAuth, controller.getPagedAndFiltered);
 router.put('/:id', verifyToken, requireAdmin, validate(ingresoUpdateSchema), controller.update);
 router.delete('/:id', verifyToken, requireAdmin, validate(ingresoCancelSchema), controller.cancel);
 

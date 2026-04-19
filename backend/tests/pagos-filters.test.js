@@ -40,6 +40,7 @@ function loadPagosService({ getAll }) {
     loaded: true,
     exports: {
       validateReferences: async () => [],
+      getConfigBancoById: async (bancoId) => (bancoId ? { id: bancoId, nombre: String(bancoId) } : null),
     },
   };
 

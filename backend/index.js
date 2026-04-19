@@ -1,13 +1,14 @@
+const { bootstrapEnvironment } = require('./config/bootstrapEnv');
+
+bootstrapEnvironment();
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const dotenv = require('dotenv');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const authService = require('./services/auth.service');
 const logger = require('./lib/logger');
-
-dotenv.config();
 
 const app = express();
 app.set('trust proxy', 1);
@@ -51,8 +52,14 @@ function parseRateLimitConfig(rawValue, fallback) {
   };
 }
 
+const defaultGlobalRateLimit = process.env.NODE_ENV === 'development'
+  ? 600
+  : process.env.NODE_ENV === 'test'
+    ? 10
+    : 120;
+
 const globalRateLimitConfig = parseRateLimitConfig(process.env.RATE_LIMIT_GLOBAL, {
-  max: 10,
+  max: defaultGlobalRateLimit,
   windowMs: 60 * 1000,
 });
 

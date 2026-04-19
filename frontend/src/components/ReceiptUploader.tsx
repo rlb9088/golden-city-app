@@ -5,11 +5,12 @@ import { analyzeOCR } from '@/lib/api';
 import './ReceiptUploader.css';
 
 interface ReceiptUploaderProps {
-  onOCRComplete: (data: { monto: number | null; fecha: string | null; imageUrl: string }) => void;
+  onOCRComplete: (data: { monto: number | null; fecha: string | null; comprobanteBase64: string }) => void;
   onError: (error: string) => void;
+  resetToken?: number;
 }
 
-export default function ReceiptUploader({ onOCRComplete, onError }: ReceiptUploaderProps) {
+export default function ReceiptUploader({ onOCRComplete, onError, resetToken }: ReceiptUploaderProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [loading, setLoading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -17,15 +18,10 @@ export default function ReceiptUploader({ onOCRComplete, onError }: ReceiptUploa
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const clearPreviewUrl = useCallback(() => {
-    setPreviewUrl((current) => {
-      if (current?.startsWith('blob:')) {
-        URL.revokeObjectURL(current);
-      }
-      return null;
-    });
+    setPreviewUrl(null);
   }, []);
 
-  // Helper para redimensionar la imagen antes de enviar a Vision API
+  // Helper para redimensionar la imagen antes de enviar a Vision API y persistirla.
   const resizeAndConvertImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -54,10 +50,12 @@ export default function ReceiptUploader({ onOCRComplete, onError }: ReceiptUploa
 
         const ctx = canvas.getContext('2d');
         if (!ctx) return reject(new Error('No canvas text'));
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
 
-        // Exportar como PNG para mantener nitidez de los bordes de texto. Tesseract y Vision leen esto 10x mejor.
-        resolve(canvas.toDataURL('image/png'));
+        // Exportar como JPEG para reducir peso sin afectar OCR.
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
       };
 
       img.onerror = () => reject(new Error('Failed to load image'));
@@ -73,14 +71,12 @@ export default function ReceiptUploader({ onOCRComplete, onError }: ReceiptUploa
     
     try {
       setLoading(true);
-      
-      // Temporarily show original image
-      const tempUrl = URL.createObjectURL(file);
-      setPreviewUrl(tempUrl);
+
       setLastDetected(null);
-      
-      // Process, resize, and convert to base64
+
+      // Process, resize, and convert to base64 JPEG.
       const base64Image = await resizeAndConvertImage(file);
+      setPreviewUrl(base64Image);
       
       // Send to OCR API
       const result = await analyzeOCR(base64Image);
@@ -96,7 +92,7 @@ export default function ReceiptUploader({ onOCRComplete, onError }: ReceiptUploa
       onOCRComplete({ 
         monto: ocrMonto, 
         fecha: result.data.fecha, 
-        imageUrl: tempUrl 
+        comprobanteBase64: base64Image 
       });
 
     } catch (err) {
@@ -143,19 +139,25 @@ export default function ReceiptUploader({ onOCRComplete, onError }: ReceiptUploa
     return () => window.removeEventListener('paste', handlePaste);
   }, [handlePaste]);
 
+  useEffect(() => {
+    if (resetToken === undefined) {
+      return;
+    }
+
+    clearPreviewUrl();
+    setLastDetected(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, [clearPreviewUrl, resetToken]);
+
   const clearImage = (e: React.MouseEvent) => {
     e.stopPropagation();
     clearPreviewUrl();
     setLastDetected(null);
-    onOCRComplete({ monto: null, fecha: null, imageUrl: '' }); // Reset fields loosely
+    onOCRComplete({ monto: null, fecha: null, comprobanteBase64: '' }); // Reset fields loosely
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
-
-  useEffect(() => () => {
-    if (previewUrl?.startsWith('blob:')) {
-      URL.revokeObjectURL(previewUrl);
-    }
-  }, [previewUrl]);
 
   return (
     <div 

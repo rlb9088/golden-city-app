@@ -69,6 +69,51 @@ function loadAuditService({ getAll }) {
   return require('../services/audit.service');
 }
 
+function loadListService(serviceRelativePath, { getAll }) {
+  const repoPath = require.resolve('../repositories/sheetsRepository');
+  const auditPath = require.resolve('../services/audit.service');
+  const configPath = require.resolve('../services/config.service');
+  const servicePath = require.resolve(serviceRelativePath);
+
+  delete require.cache[servicePath];
+  delete require.cache[repoPath];
+  delete require.cache[auditPath];
+  delete require.cache[configPath];
+
+  require.cache[repoPath] = {
+    id: repoPath,
+    filename: repoPath,
+    loaded: true,
+    exports: {
+      getAll,
+      append: async () => ({}),
+      update: async () => ({}),
+      deleteRow: async () => ({}),
+      findByColumn: async () => [],
+    },
+  };
+
+  require.cache[auditPath] = {
+    id: auditPath,
+    filename: auditPath,
+    loaded: true,
+    exports: {
+      log: async () => ({ id: 'AUD-1' }),
+    },
+  };
+
+  require.cache[configPath] = {
+    id: configPath,
+    filename: configPath,
+    loaded: true,
+    exports: {
+      validateReferences: async () => [],
+    },
+  };
+
+  return require(serviceRelativePath);
+}
+
 test('getPagedAndFiltered pagina pagos con defaults y orden mas reciente primero', async () => {
   const pagosService = loadPagosService({
     getAll: async () => Array.from({ length: 55 }, (_, index) => ({
@@ -158,6 +203,121 @@ test('audit getPagedAndFiltered pagina resultados ya ordenados por timestamp des
   const page = await auditService.getPagedAndFiltered({ user: 'admin' }, 1, 1);
 
   assert.deepStrictEqual(page.items.map((item) => item.id), ['AUD-1']);
+  assert.equal(page.pagination.total, 2);
+  assert.equal(page.pagination.hasMore, false);
+});
+
+test('ingresos getPagedAndFiltered aplica filtros de agente, banco, usuario y rango de fechas', async () => {
+  const ingresosService = loadListService('../services/ingresos.service', {
+    getAll: async () => ([
+      {
+        id: 'ING-1',
+        agente: 'Norte',
+        banco: 'BCP',
+        usuario: 'Ana',
+        fecha_movimiento: '2026-04-01T10:00:00',
+      },
+      {
+        id: 'ING-2',
+        agente: 'Norte',
+        banco: 'BCP',
+        usuario: 'Ana',
+        fecha_movimiento: '2026-04-02T10:00:00',
+      },
+      {
+        id: 'ING-3',
+        agente: 'Norte',
+        banco: 'Interbank',
+        usuario: 'Ana',
+        fecha_movimiento: '2026-04-03T10:00:00',
+      },
+      {
+        id: 'ING-4',
+        agente: 'Sur',
+        banco: 'BCP',
+        usuario: 'Luis',
+        fecha_movimiento: '2026-04-04T10:00:00',
+      },
+    ]),
+  });
+
+  const page = await ingresosService.getPagedAndFiltered({
+    agente: 'norte',
+    banco: 'bcp',
+    usuario: 'ana',
+    desde: '2026-04-01',
+    hasta: '2026-04-02',
+  }, 10, 0);
+
+  assert.deepStrictEqual(page.items.map((item) => item.id), ['ING-2', 'ING-1']);
+  assert.equal(page.pagination.total, 2);
+  assert.equal(page.pagination.hasMore, false);
+});
+
+test('gastos getPagedAndFiltered filtra por categoria y fechas', async () => {
+  const gastosService = loadListService('../services/gastos.service', {
+    getAll: async () => ([
+      {
+        id: 'GAS-1',
+        categoria: 'Operativos',
+        fecha_gasto: '2026-04-01',
+      },
+      {
+        id: 'GAS-2',
+        categoria: 'Logistica',
+        fecha_gasto: '2026-04-02',
+      },
+      {
+        id: 'GAS-3',
+        categoria: 'Logistica',
+        fecha_gasto: '2026-04-03',
+      },
+      {
+        id: 'GAS-4',
+        categoria: 'Marketing',
+        fecha_gasto: '2026-04-04',
+      },
+    ]),
+  });
+
+  const page = await gastosService.getPagedAndFiltered({
+    categoria: 'logistica',
+    desde: '2026-04-02',
+    hasta: '2026-04-03',
+  }, 10, 0);
+
+  assert.deepStrictEqual(page.items.map((item) => item.id), ['GAS-3', 'GAS-2']);
+  assert.equal(page.pagination.total, 2);
+  assert.equal(page.pagination.hasMore, false);
+});
+
+test('bancos getPagedAndFiltered pagina y filtra por agente', async () => {
+  const bancosService = loadListService('../services/bancos.service', {
+    getAll: async () => ([
+      {
+        id: 'BAN-1',
+        banco: 'BCP',
+        agente: 'Norte',
+        fecha: '2026-04-01',
+      },
+      {
+        id: 'BAN-2',
+        banco: 'Interbank',
+        agente: 'Sur',
+        fecha: '2026-04-02',
+      },
+      {
+        id: 'BAN-3',
+        banco: 'BBVA',
+        agente: 'Norte',
+        fecha: '2026-04-03',
+      },
+    ]),
+  });
+
+  const page = await bancosService.getPagedAndFiltered({ agente: 'norte' }, 1, 1);
+
+  assert.deepStrictEqual(page.items.map((item) => item.id), ['BAN-1']);
   assert.equal(page.pagination.total, 2);
   assert.equal(page.pagination.hasMore, false);
 });

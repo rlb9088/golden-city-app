@@ -86,6 +86,112 @@ Suggested settings:
 
 If you later split frontend and backend into separate deployments, set `NEXT_PUBLIC_API_URL` to the public backend URL and keep `CORS_ORIGIN` aligned with the frontend origin.
 
+## Vercel (frontend) + Railway (backend)
+
+La opción recomendada para este proyecto. El frontend Next.js se despliega en Vercel de forma nativa; el backend Express en Railway como proceso Node.js siempre activo.
+
+### Punto crítico de configuración
+
+`next.config.ts` reescribe `/api/*` → `BACKEND_INTERNAL_URL`. Esta variable se evalúa en **build time** en Vercel, no en runtime. Debe configurarse como Environment Variable en Vercel **antes** de lanzar el primer build.
+
+### Pre-requisito
+
+**Ejecutar TICKET-055 antes de cualquier deploy**: los scripts de migración (`migrateAuthUsersToAgentes.js` y `migrateBancoId.js`) deben correr en modo `--dry-run` + `--commit` contra la hoja de producción antes de subir el backend.
+
+### Paso 1 — Backend en Railway
+
+1. Crear proyecto Railway desde GitHub. Root dir = `backend/`.
+2. Configurar variables de entorno en Railway:
+   ```
+   NODE_ENV=production
+   PORT=3001
+   JWT_SECRET=<mínimo 32 chars — generar con: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))">
+   AUTH_BOOTSTRAP_ADMIN_PASSWORD=<contraseña admin>
+   AUTH_BOOTSTRAP_AGENT_PASSWORD=<contraseña agente>
+   GOOGLE_SHEET_ID=<id del spreadsheet de producción>
+   CORS_ORIGIN=https://<tu-dominio>.vercel.app
+   R2_ACCOUNT_ID=<cloudflare account id>
+   R2_ACCESS_KEY_ID=<r2 key>
+   R2_SECRET_ACCESS_KEY=<r2 secret>
+   R2_BUCKET=<nombre del bucket>
+   R2_PUBLIC_URL=https://<r2-public-domain>
+   GOOGLE_CREDENTIALS_BASE64=<service account JSON codificado en base64>
+   ```
+3. Agregar al inicio de `backend/index.js` la decodificación de credenciales (antes de cualquier import que las use):
+   ```js
+   const { bootstrapEnvironment } = require('./config/bootstrapEnv');
+   bootstrapEnvironment();
+   ```
+4. Verificar: `GET https://<railway-url>/api/health` → 200.
+5. Anotar la URL pública de Railway.
+
+### Paso 2 — Frontend en Vercel
+
+1. Importar proyecto en Vercel. Root dir = `frontend/`.
+2. Configurar variable de entorno en Vercel (para Production y Preview):
+   ```
+   BACKEND_INTERNAL_URL=https://<railway-url>
+   ```
+3. Deploy. Anotar la URL de Vercel.
+4. Volver a Railway → actualizar `CORS_ORIGIN` con la URL real de Vercel → redeploy.
+
+### Paso 3 — CORS del bucket R2
+
+Configurar en Cloudflare Dashboard la CORS policy del bucket:
+```json
+[{
+  "AllowedOrigins": ["https://<tu-dominio>.vercel.app"],
+  "AllowedMethods": ["GET"],
+  "AllowedHeaders": ["*"],
+  "MaxAgeSeconds": 3600
+}]
+```
+
+### Paso 4 — CI/CD automático
+
+- **Railway**: activar integración GitHub en el proyecto. Auto-deploy en push a `main` tras tests ✅.
+- **Vercel**: activar integración GitHub. Auto-deploy en `main` + preview URLs por branch.
+
+### Checklist de smoke test post-deploy
+
+- [ ] `GET /api/health` → 200
+- [ ] Login con credenciales admin → access + refresh tokens
+- [ ] Login con credenciales agente → access + refresh tokens
+- [ ] Credenciales inválidas → 401
+- [ ] `GET /api/config` sin auth → 200
+- [ ] `GET /api/pagos` con JWT → datos paginados
+- [ ] `POST /api/pagos` con JWT → registro visible en Google Sheets
+- [ ] Upload comprobante en un pago → objeto creado en R2
+- [ ] `GET /api/balance` → valores numéricos
+- [ ] `GET /api/audit` (JWT admin) → eventos de auditoría incluyendo los de migración (TICKET-055)
+- [ ] Frontend: login sin errores en consola
+- [ ] Frontend: banner de estado backend en verde
+- [ ] Rate limiting: 6 intentos de login rápidos → 429 en el 6to
+
+### Smoke test ejecutable desde el repo
+
+Para automatizar las comprobaciones HTTP principales contra producción:
+
+```bash
+node scripts/smoke-production.mjs
+```
+
+Variables requeridas:
+
+- `PRODUCTION_BACKEND_URL`
+- `PRODUCTION_FRONTEND_URL`
+
+Variables opcionales para validar login real:
+
+- `PRODUCTION_ADMIN_USERNAME` (default `admin`)
+- `PRODUCTION_ADMIN_PASSWORD`
+- `PRODUCTION_AGENT_USERNAME`
+- `PRODUCTION_AGENT_PASSWORD`
+
+El script valida health, config pública, credenciales inválidas, login admin/agente si se proporcionan, endpoints protegidos (`/api/pagos`, `/api/balance`, `/api/audit`) y respuesta base del frontend. Las verificaciones que escriben datos o requieren navegador siguen siendo manuales.
+
+---
+
 ## Secret Management
 
 Do not bake secrets into the image.

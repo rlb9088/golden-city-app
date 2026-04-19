@@ -11,6 +11,7 @@ function AuthLayoutShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const { isReady, isAuthenticated } = useAuth();
   const isLoginRoute = pathname === '/login';
 
@@ -27,6 +28,25 @@ function AuthLayoutShell({ children }: { children: React.ReactNode }) {
       router.replace('/balance');
     }
   }, [isAuthenticated, isLoginRoute, isReady, router]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 768px)');
+
+    const syncViewport = () => {
+      setIsMobileViewport(mediaQuery.matches);
+
+      if (!mediaQuery.matches) {
+        setIsSidebarOpen(false);
+      }
+    };
+
+    syncViewport();
+    mediaQuery.addEventListener('change', syncViewport);
+
+    return () => {
+      mediaQuery.removeEventListener('change', syncViewport);
+    };
+  }, []);
 
   if (isLoginRoute) {
     return <>{children}</>;
@@ -74,7 +94,7 @@ function AuthLayoutShell({ children }: { children: React.ReactNode }) {
         isMobileOpen={isSidebarOpen}
         onMobileOpenChange={setIsSidebarOpen}
       />
-      {isSidebarOpen && (
+      {isSidebarOpen && isMobileViewport && (
         <button
           type="button"
           className="sidebar-backdrop"

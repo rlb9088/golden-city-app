@@ -18,6 +18,24 @@ async function addToTable(req, res) {
   res.status(201).json({ status: 'success', data: record });
 }
 
+async function updateInTable(req, res) {
+  const { table, id } = req.params;
+  const record = await configService.updateInTable(table, id, req.body, req.auth.user);
+  res.json({ status: 'success', data: record });
+}
+
+async function changePassword(req, res) {
+  const { table, id } = req.params;
+  const { password } = req.body;
+  if (table !== 'agentes') {
+    throw new BadRequestError('El cambio de contrasena solo aplica a agentes.', {
+      context: { table, id },
+    });
+  }
+  const record = await configService.updateAgentPassword(id, password, req.auth.user);
+  res.json({ status: 'success', data: record });
+}
+
 async function removeFromTable(req, res) {
   const { table, id } = req.params;
   const result = await configService.removeFromTable(table, id, req.auth.user);
@@ -40,4 +58,4 @@ async function importBatch(req, res) {
   res.status(201).json({ status: 'success', data: results, count: results.length });
 }
 
-module.exports = { getFullConfig, getTable, addToTable, removeFromTable, importBatch };
+module.exports = { getFullConfig, getTable, addToTable, updateInTable, changePassword, removeFromTable, importBatch };

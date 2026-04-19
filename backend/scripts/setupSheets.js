@@ -123,6 +123,197 @@ function toColumnLetter(columnNumber) {
   return column;
 }
 
+function normalizeText(value) {
+  return String(value ?? '').trim();
+}
+
+function normalizeLookup(value) {
+  return normalizeText(value).toLowerCase();
+}
+
+function normalizeNameKey(value) {
+  return normalizeLookup(value).replace(/\s+/g, ' ');
+}
+
+function isExactHeaderMatch(actualHeaders = [], expectedHeaders = []) {
+  return actualHeaders.length === expectedHeaders.length
+    && actualHeaders.every((header, index) => header === expectedHeaders[index]);
+}
+
+function detectSingleMissingHeaderIndex(actualHeaders = [], expectedHeaders = []) {
+  if (actualHeaders.length !== expectedHeaders.length - 1) {
+    return -1;
+  }
+
+  for (let missingIndex = 0; missingIndex < expectedHeaders.length; missingIndex += 1) {
+    const candidate = expectedHeaders.filter((_, index) => index !== missingIndex);
+    if (candidate.length === actualHeaders.length && candidate.every((header, index) => header === actualHeaders[index])) {
+      return missingIndex;
+    }
+  }
+
+  return -1;
+}
+
+async function getSheetIdByName(sheets, spreadsheetId, sheetName) {
+  const metadata = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets.properties(sheetId,title)',
+  });
+
+  const sheet = (metadata.data.sheets || []).find((item) => item.properties?.title === sheetName);
+  return sheet?.properties?.sheetId ?? null;
+}
+
+async function insertColumnsBefore(sheets, spreadsheetId, sheetName, columnIndex, columnCount = 1) {
+  const sheetId = await getSheetIdByName(sheets, spreadsheetId, sheetName);
+  if (sheetId === null) {
+    throw new Error(`No se pudo resolver el sheetId de ${sheetName}.`);
+  }
+
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [
+        {
+          insertDimension: {
+            range: {
+              sheetId,
+              dimension: 'COLUMNS',
+              startIndex: columnIndex,
+              endIndex: columnIndex + columnCount,
+            },
+            inheritFromBefore: true,
+          },
+        },
+      ],
+    },
+  });
+}
+
+async function alignSheetSchema(sheets, spreadsheetId, sheetName, expectedHeaders) {
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `${sheetName}!1:1`,
+    valueRenderOption: 'FORMATTED_VALUE',
+  });
+
+  const actualHeaders = response.data.values?.[0] || [];
+  if (isExactHeaderMatch(actualHeaders, expectedHeaders)) {
+    return { status: 'already_aligned' };
+  }
+
+  const missingIndex = detectSingleMissingHeaderIndex(actualHeaders, expectedHeaders);
+  if (missingIndex !== -1) {
+    await insertColumnsBefore(sheets, spreadsheetId, sheetName, missingIndex, 1);
+    return { status: 'inserted_column', missingIndex };
+  }
+
+  if (actualHeaders.length === 0) {
+    return { status: 'empty_sheet' };
+  }
+
+  if (actualHeaders.length < expectedHeaders.length) {
+    const isPrefix = actualHeaders.every((header, index) => header === expectedHeaders[index]);
+    if (isPrefix) {
+      return { status: 'prefix_match' };
+    }
+  }
+
+  throw new Error(`No se pudo alinear el schema de ${sheetName}. Actual: ${actualHeaders.join(', ')}`);
+}
+
+async function backfillConfigBancosOwnerIds(sheets, spreadsheetId) {
+  const agentesResponse = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: 'config_agentes!A:Z',
+    valueRenderOption: 'UNFORMATTED_VALUE',
+  });
+
+  const agentesRows = agentesResponse.data.values || [];
+  if (agentesRows.length < 2) {
+    return { updated: 0, skipped: 0 };
+  }
+
+  const agentesHeaders = agentesRows[0];
+  const agentes = agentesRows.slice(1).map((row) => {
+    const obj = {};
+    agentesHeaders.forEach((header, index) => {
+      obj[header] = row[index] ?? '';
+    });
+    return obj;
+  });
+
+  const byName = new Map();
+  for (const agente of agentes) {
+    const nameKey = normalizeNameKey(agente.nombre);
+    if (!nameKey) continue;
+    if (!byName.has(nameKey)) {
+      byName.set(nameKey, []);
+    }
+    byName.get(nameKey).push(agente);
+  }
+
+  const bancosResponse = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: 'config_bancos!A:Z',
+    valueRenderOption: 'UNFORMATTED_VALUE',
+  });
+
+  const bancosRows = bancosResponse.data.values || [];
+  if (bancosRows.length < 2) {
+    return { updated: 0, skipped: 0 };
+  }
+
+  const bancosHeaders = bancosRows[0];
+  const bancos = bancosRows.slice(1).map((row, index) => {
+    const obj = { _rowIndex: index + 2 };
+    bancosHeaders.forEach((header, colIndex) => {
+      obj[header] = row[colIndex] ?? '';
+    });
+    return obj;
+  });
+
+  const bancoIdColumn = bancosHeaders.indexOf('propietario_id');
+  if (bancoIdColumn === -1) {
+    throw new Error('config_bancos no tiene la columna propietario_id después de alinear el schema.');
+  }
+
+  let updated = 0;
+  let skipped = 0;
+
+  for (const banco of bancos) {
+    if (normalizeText(banco.propietario_id)) {
+      skipped += 1;
+      continue;
+    }
+
+    const matches = byName.get(normalizeNameKey(banco.propietario)) || [];
+    if (matches.length !== 1) {
+      skipped += 1;
+      continue;
+    }
+
+    const matchedAgent = matches[0];
+    const nextRow = bancosHeaders.map((header) => {
+      if (header === 'propietario_id') {
+        return matchedAgent.id;
+      }
+      return banco[header] ?? '';
+    });
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `config_bancos!A${banco._rowIndex}:Z${banco._rowIndex}`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [nextRow] },
+    });
+    updated += 1;
+  }
+
+  return { updated, skipped };
+}
+
 async function ensureSheetsExist(sheets, spreadsheetId) {
   const metadata = await sheets.spreadsheets.get({ spreadsheetId });
   const existing = new Set((metadata.data.sheets || []).map((s) => s.properties.title));
@@ -145,6 +336,7 @@ async function ensureSheetsExist(sheets, spreadsheetId) {
 
 async function writeHeaders(sheets, spreadsheetId) {
   for (const sheet of SHEETS_SCHEMA) {
+    await alignSheetSchema(sheets, spreadsheetId, sheet.name, sheet.headers);
     const endColumn = toColumnLetter(sheet.headers.length);
     await sheets.spreadsheets.values.update({
       spreadsheetId,
@@ -206,6 +398,11 @@ async function main() {
     await writeHeaders(sheets, spreadsheetId);
     console.log('[SheetsSetup] Headers written in row 1.');
 
+    const ownerBackfill = await backfillConfigBancosOwnerIds(sheets, spreadsheetId);
+    if (ownerBackfill.updated > 0) {
+      console.log(`[SheetsSetup] Backfilled config_bancos.owner_id for ${ownerBackfill.updated} rows.`);
+    }
+
     const failures = await verifyHeaders(sheets, spreadsheetId);
     if (failures.length > 0) {
       console.error('[SheetsSetup] Header verification failed.');
@@ -243,3 +440,15 @@ main().catch((error) => {
   }
   process.exitCode = 1;
 });
+
+module.exports = {
+  alignSheetSchema,
+  detectSingleMissingHeaderIndex,
+  getSheetIdByName,
+  insertColumnsBefore,
+  isExactHeaderMatch,
+  backfillConfigBancosOwnerIds,
+  normalizeLookup,
+  normalizeNameKey,
+  normalizeText,
+};

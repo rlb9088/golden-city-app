@@ -6,7 +6,7 @@ const { verifyToken, requireAuth, requireAdmin } = require('../middleware/auth.m
 const { gastoSchema, gastoUpdateSchema, gastoCancelSchema } = require('../schemas/gastos.schema');
 
 router.post('/', verifyToken, requireAdmin, validate(gastoSchema), controller.create);
-router.get('/', verifyToken, requireAuth, controller.getAll);
+router.get('/', verifyToken, requireAuth, controller.getPagedAndFiltered);
 router.put('/:id', verifyToken, requireAdmin, validate(gastoUpdateSchema), controller.update);
 router.delete('/:id', verifyToken, requireAdmin, validate(gastoCancelSchema), controller.cancel);
 

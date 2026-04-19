@@ -1,7 +1,7 @@
 # Decisiones Técnicas — Golden City Backoffice
 
-> **Versión**: 1.2  
-> **Última actualización**: 2026-04-16
+> **Versión**: 1.5  
+> **Última actualización**: 2026-04-19
 
 Este documento registra las decisiones técnicas clave del proyecto, con su contexto, alternativas evaluadas y razón de la elección. Se actualiza conforme evoluciona el proyecto.
 
@@ -302,7 +302,7 @@ Hacer el frontend resiliente a fallos de red y latencia del backend mediante tim
 Reemplazar auth por headers HTTP con JWT basado en credenciales username/password almacenadas en la tabla `config_auth_users` de Google Sheets, con hashing bcrypt.
 
 ### Implementación
-- Tabla `config_auth_users` con headers: id, username, password_hash, role, nombre
+- ~~Tabla `config_auth_users`~~ → **Supersedido por ADR-021**: la fuente de identidad es ahora `config_agentes` (headers: id, nombre, username, password_hash, role, activo)
 - Bootstrap automático con 2 usuarios: `admin` y `agent` (credenciales configurables vía env)
 - Endpoint `POST /api/auth/login`: valida credenciales, retorna JWT firmado
 - Middleware `verifyToken`: extrae Bearer token del header `Authorization`, verifica con `jwt.verify()`
@@ -396,6 +396,150 @@ Exponer el log de auditoría mediante endpoint `GET /api/audit` (admin-only) con
 
 ---
 
+---
+
+## ADR-018: Almacenamiento de comprobantes en Google Drive
+
+**Estado**: ⛔ Superseded por ADR-020
+**Fecha**: 2026-04-17
+
+### Contexto
+Los pagos incluyen una imagen de comprobante (voucher bancario). La imagen se procesa con OCR pero no se almacena. La celda `comprobante_url` en Sheets queda con un blob URL temporal del navegador, inútil tras cerrar la sesión.
+
+### Alternativas evaluadas
+
+| Opción | Pros | Contras |
+|--------|------|---------|
+| Base64 en Sheets | Sin dependencias extra | Celda limitada a ~50k chars; inviable para imágenes |
+| Filesystem backend | Simple | Se pierde con redeploy del contenedor; no compartible |
+| Cloudinary / S3 | Robusto, CDN | Vendor extra, costo, credenciales adicionales |
+| **Google Drive** | Reutiliza SA existente, sin costo extra, coherente con stack | Requiere scope adicional y carpeta compartida manual |
+
+### Decisión
+Ver ADR-020 para la solución vigente con Cloudflare R2.
+
+### Reemplazo
+- Sustituido por ADR-020
+
+### Consecuencias
+- Comprobantes accesibles vía link permanente para admins con acceso a la carpeta
+- Requiere paso manual: crear carpeta Drive y compartirla con el SA
+- Scope `drive.file` puede requerir actualizar las credenciales del SA
+
+---
+
+## ADR-019: Batch append para importaciones masivas a Sheets
+
+**Estado**: ✅ Vigente
+**Fecha**: 2026-04-17
+
+### Contexto
+La importación masiva de usuarios (y otras entidades de config) realiza una llamada individual a `values.append` por cada fila. Con 162 usuarios = 162 API calls, superando el límite de ~100 req/100s definido en ADR-001. Solo ~33 registros persisten antes de que el rate-limit aborte el proceso.
+
+### Decisión
+Implementar `repo.appendBatch(sheetName, rows[])` que agrupa todas las filas en **una sola llamada** a la Google Sheets API (`values.append` acepta array de arrays). Para payloads muy grandes (>500 filas densas), partir en chunks con delay mínimo entre chunks.
+
+### Razones
+- La API de Sheets soporta nativamente múltiples filas en un solo request.
+- 1 call vs N calls: elimina el rate-limit como limitante para volúmenes operativos normales.
+- La auditoría colapsa a 1 evento con `count`, en lugar de N eventos individuales.
+
+### Consecuencias
+- `appendBatch` reemplaza el loop de `append` en `importBatch`.
+- El método `append` individual se mantiene para operaciones de fila única.
+- Si la operación falla, ninguna fila parcial queda en Sheets (operación atómica desde perspectiva de la API).
+
+---
+
+## ADR-020: Cloudflare R2 como almacenamiento de comprobantes
+
+**Estado**: ✅ Vigente  
+**Fecha**: 2026-04-18
+
+### Contexto
+Los comprobantes de pago necesitan persistencia real y un identificador reutilizable. Google Drive funcionaba como idea inicial, pero el caso de uso aquí es el de almacenamiento de objetos y no el de colaboración documental.
+
+### Alternativas evaluadas
+
+| Opción | Pros | Contras |
+|--------|------|---------|
+| Google Drive | Reutiliza Service Account existente | Modelo de permisos menos natural para archivos de aplicación |
+| AWS S3 | Estándar de facto | Costo y egress menos convenientes para el MVP |
+| **Cloudflare R2** | S3-compatible, sin egress, coste bajo, simple de integrar | Requiere credenciales y bucket propios |
+
+### Decisión
+Usar Cloudflare R2 como almacenamiento persistente de comprobantes. El backend sube el objeto con `PutObject`, guarda la key en `comprobante_file_id` y la URL pública en `comprobante_url`.
+
+### Consecuencias
+- Los comprobantes sobreviven al cierre de sesión y al redeploy.
+- Se desacopla el almacenamiento de la interfaz del navegador.
+- El acceso al archivo depende de `R2_PUBLIC_URL` y de la política del bucket.
+
+### Mitigaciones
+- Degradación elegante: si R2 falla, el pago igual se registra y se deja warning.
+- La configuración queda centralizada por variables de entorno.
+
+---
+
+## ADR-021: Identidad unificada en `config_agentes`
+
+**Estado**: ✅ Vigente  
+**Fecha**: 2026-04-18
+
+### Contexto
+La identidad operativa se estaba duplicando entre `config_auth_users` y `config_agentes`. Eso complica el scoping, la migración de datos y el mantenimiento de reglas que dependen del propietario.
+
+### Alternativas evaluadas
+
+| Opción | Pros | Contras |
+|--------|------|---------|
+| Mantener dos fuentes | Menor cambio inmediato | Duplicación, inconsistencia y más lógica de sincronización |
+| **Una sola tabla (`config_agentes`)** | Fuente única, más simple para scoping y migraciones | Requiere migración y ajuste de auth |
+
+### Decisión
+`config_agentes` pasa a ser la fuente única de identidad operativa. `config_auth_users` se migra y se elimina como fuente primaria mediante TICKET-054.
+
+### Consecuencias
+- Los agentes y la autenticación comparten el mismo registro base.
+- Las referencias de propietario quedan alineadas con el resto del modelo.
+- El código de scoping deja de depender de duplicación de datos.
+
+### Mitigaciones
+- Migración controlada con respaldo de los datos existentes.
+- Fallback temporal en lectura mientras se completa la transición.
+
+---
+
+## ADR-022: `banco_id` como FK en movimientos
+
+**Estado**: ✅ Vigente  
+**Fecha**: 2026-04-18
+
+### Contexto
+Usar el nombre del banco como texto libre no permite scoping fiable ni validación referencial. Tampoco facilita migraciones ni comparaciones consistentes entre movimientos y saldos.
+
+### Alternativas evaluadas
+
+| Opción | Pros | Contras |
+|--------|------|---------|
+| Texto libre `banco` | Simple de mostrar | Ambiguo, frágil y difícil de validar |
+| FK opcional | Más flexible | Mantiene ambigüedad si no se normaliza |
+| **`banco_id` como FK** | Determinístico, validable, apto para scoping | Requiere migración y normalización histórica |
+
+### Decisión
+Los movimientos y saldos bancarios referencian bancos por `banco_id`. El nombre queda como dato derivado para presentación.
+
+### Consecuencias
+- El scoping por propietario es determinista.
+- Se simplifican filtros y validaciones.
+- El modelo soporta migración histórica sin ambigüedad.
+
+### Mitigaciones
+- Migración de datos legacy vía TICKET-053.
+- Compatibilidad temporal con registros antiguos durante el rollout.
+
+---
+
 ## Registro de Cambios
 
 | Fecha | ADR | Cambio |
@@ -404,3 +548,6 @@ Exponer el log de auditoría mediante endpoint `GET /api/audit` (admin-only) con
 | 2026-04-16 | 011-013 | ADRs para error handling, validación referencial y resiliencia frontend |
 | 2026-04-16 | 004 | ADR-004 marcado Superseded por ADR-014 |
 | 2026-04-16 | 014-017 | ADRs para JWT auth, soft-delete estado, filtros pagos, audit UI |
+| 2026-04-17 | 018-019 | ADRs para comprobantes en Drive e importación batch; revisión post-UAT Sprint 6 |
+| 2026-04-18 | 018, 020-022 | ADR-018 superseded y nuevas decisiones para R2, identidad unificada y `banco_id` FK |
+| 2026-04-19 | 014 | ADR-014 actualizado: fuente de identidad migrada de `config_auth_users` a `config_agentes` per ADR-021 |
