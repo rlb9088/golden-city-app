@@ -93,6 +93,38 @@ function isLegacyPagosHeaderWithoutBancoIdAndReceiptFile(headers = []) {
     && headers[10] === 'agente';
 }
 
+function isLegacyIngresosHeaderWithoutBancoId(headers = []) {
+  return headers.length === 7
+    && headers[0] === 'id'
+    && headers[1] === 'estado'
+    && headers[2] === 'agente'
+    && headers[3] === 'banco'
+    && headers[4] === 'monto'
+    && headers[5] === 'fecha_movimiento'
+    && headers[6] === 'fecha_registro';
+}
+
+function isLegacyGastosHeaderWithoutBancoId(headers = []) {
+  return headers.length === 9
+    && headers[0] === 'id'
+    && headers[1] === 'estado'
+    && headers[2] === 'fecha_gasto'
+    && headers[3] === 'fecha_registro'
+    && headers[4] === 'concepto'
+    && headers[5] === 'categoria'
+    && headers[6] === 'subcategoria'
+    && headers[7] === 'banco'
+    && headers[8] === 'monto';
+}
+
+function isLegacyBancosHeaderWithoutBancoId(headers = []) {
+  return headers.length === 4
+    && headers[0] === 'id'
+    && headers[1] === 'fecha'
+    && headers[2] === 'banco'
+    && headers[3] === 'saldo';
+}
+
 async function getTargetSheetId(sheets, spreadsheetId, sheetName) {
   const spreadsheet = await sheets.spreadsheets.get({
     spreadsheetId,
@@ -123,6 +155,72 @@ async function ensureSheetSchema(sheets, spreadsheetId, sheetName, expectedHeade
     )
   ) {
     logger.warn('Migrating legacy pagos schema to restore the expected headers', {
+      context: buildContext(sheetName, operation, {
+        schemaMigration: true,
+        fromHeaders: actualHeaders,
+        toHeaders: expectedHeaders,
+      }),
+    });
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${sheetName}!A1:${toColumnLetter(expectedHeaders.length)}1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [expectedHeaders] },
+    });
+
+    return;
+  }
+
+  if (
+    sheetName === 'ingresos'
+    && isLegacyIngresosHeaderWithoutBancoId(actualHeaders)
+  ) {
+    logger.warn('Migrating legacy ingresos schema to restore the expected headers', {
+      context: buildContext(sheetName, operation, {
+        schemaMigration: true,
+        fromHeaders: actualHeaders,
+        toHeaders: expectedHeaders,
+      }),
+    });
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${sheetName}!A1:${toColumnLetter(expectedHeaders.length)}1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [expectedHeaders] },
+    });
+
+    return;
+  }
+
+  if (
+    sheetName === 'gastos'
+    && isLegacyGastosHeaderWithoutBancoId(actualHeaders)
+  ) {
+    logger.warn('Migrating legacy gastos schema to restore the expected headers', {
+      context: buildContext(sheetName, operation, {
+        schemaMigration: true,
+        fromHeaders: actualHeaders,
+        toHeaders: expectedHeaders,
+      }),
+    });
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${sheetName}!A1:${toColumnLetter(expectedHeaders.length)}1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [expectedHeaders] },
+    });
+
+    return;
+  }
+
+  if (
+    sheetName === 'bancos'
+    && isLegacyBancosHeaderWithoutBancoId(actualHeaders)
+  ) {
+    logger.warn('Migrating legacy bancos schema to restore the expected headers', {
       context: buildContext(sheetName, operation, {
         schemaMigration: true,
         fromHeaders: actualHeaders,
