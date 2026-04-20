@@ -32,6 +32,10 @@ const SHEETS_SCHEMA = [
     headers: ['id', 'nombre', 'propietario', 'propietario_id'],
   },
   {
+    name: 'config_settings',
+    headers: ['key', 'value', 'fecha_efectiva', 'actualizado_por', 'actualizado_en'],
+  },
+  {
     name: 'config_cajas',
     headers: ['id', 'nombre'],
   },

@@ -135,6 +135,14 @@ function normalizeNameKey(value) {
   return normalizeLookup(value).replace(/\s+/g, ' ');
 }
 
+function getFirstDayOfCurrentMonthLima() {
+  const today = new Date().toLocaleDateString('sv-SE', {
+    timeZone: 'America/Lima',
+  });
+
+  return `${today.slice(0, 7)}-01`;
+}
+
 function isExactHeaderMatch(actualHeaders = [], expectedHeaders = []) {
   return actualHeaders.length === expectedHeaders.length
     && actualHeaders.every((header, index) => header === expectedHeaders[index]);
@@ -347,6 +355,38 @@ async function writeHeaders(sheets, spreadsheetId) {
   }
 }
 
+async function seedConfigSettings(sheets, spreadsheetId) {
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: 'config_settings!A:E',
+    valueRenderOption: 'UNFORMATTED_VALUE',
+  });
+
+  const rows = response.data.values || [];
+  const hasSeed = rows.slice(1).some((row) => String(row[0] ?? '').trim().toLowerCase() === 'caja_inicio_mes');
+  if (hasSeed) {
+    return { seeded: false };
+  }
+
+  const seedRow = [
+    'caja_inicio_mes',
+    '0',
+    getFirstDayOfCurrentMonthLima(),
+    'system',
+    new Date().toISOString(),
+  ];
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: 'config_settings!A:E',
+    valueInputOption: 'RAW',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values: [seedRow] },
+  });
+
+  return { seeded: true };
+}
+
 async function verifyHeaders(sheets, spreadsheetId) {
   const failures = [];
 
@@ -397,6 +437,11 @@ async function main() {
 
     await writeHeaders(sheets, spreadsheetId);
     console.log('[SheetsSetup] Headers written in row 1.');
+
+    const settingsSeed = await seedConfigSettings(sheets, spreadsheetId);
+    if (settingsSeed.seeded) {
+      console.log('[SheetsSetup] Seeded config_settings.caja_inicio_mes.');
+    }
 
     const ownerBackfill = await backfillConfigBancosOwnerIds(sheets, spreadsheetId);
     if (ownerBackfill.updated > 0) {
@@ -451,4 +496,6 @@ module.exports = {
   normalizeLookup,
   normalizeNameKey,
   normalizeText,
+  getFirstDayOfCurrentMonthLima,
+  seedConfigSettings,
 };

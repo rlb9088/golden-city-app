@@ -1,7 +1,7 @@
 # Arquitectura — Golden City Backoffice
 
-> **Versión**: 1.5  
-> **Última actualización**: 2026-04-19
+> **Versión**: 1.7  
+> **Última actualización**: 2026-04-20
 
 ---
 
@@ -25,12 +25,12 @@
 │  └──────────────────────────────────────────────────────────┘   │
 │                             │                                    │
 │                     HTTP REST (JSON)                             │
-│                  x-role / x-user headers                        │
+│              Authorization: Bearer <JWT> (access)                │
 │                             │                                    │
 │  ┌──────────────────────────────────────────────────────────┐   │
 │  │                Backend (Express.js 5)                     │   │
 │  │                                                          │   │
-│  │  Middleware: CORS → JSON → Auth (extractAuth)            │   │
+│  │  Middleware: CORS → Helmet → RateLimit → JSON → JWT      │   │
 │  │                                                          │   │
 │  │  ┌────────────┐      ┌────────────┐                     │   │
 │  │  │ Controllers │ ───→ │  Services  │                     │   │
@@ -53,7 +53,7 @@
 │  │              Google Sheets (Spreadsheet)                   │   │
 │  │                                                          │   │
 │  │  pagos │ ingresos │ gastos │ bancos │ audit              │   │
-│  │  config_agentes │ config_bancos │ config_cajas │ ...     │   │
+│  │  config_agentes │ config_bancos │ config_settings │ ...  │   │
 │  └──────────────────────────────────────────────────────────┘   │
 │                                                                 │
 │  ┌──────────────────────────────────────────────────────────┐   │
@@ -258,6 +258,8 @@ Google Sheets API / In-memory store
 | POST | `/api/auth/login` | - | Login con username/password, retorna JWT |
 | GET | `/api/auth/me` | verifyToken | Datos del usuario logueado |
 | GET | `/api/config` | - | Config completa para los selects (sin auth) |
+| GET | `/api/config/settings/:key` | Auth | Lectura de un ajuste singleton (p.ej. `caja_inicio_mes`) |
+| PUT | `/api/config/settings/:key` | Admin | Upsert de un ajuste singleton |
 | GET | `/api/config/:table` | Admin | Datos de una tabla de config |
 | POST | `/api/config/:table` | Admin | Agregar registro a tabla |
 | POST | `/api/config/:table/import` | Admin | Importación masiva |
@@ -276,7 +278,7 @@ Google Sheets API / In-memory store
 | DELETE | `/api/gastos/:id` | Admin | Anular gasto |
 | POST | `/api/bancos` | Admin | Upsert saldo bancario |
 | GET | `/api/bancos` | Auth | Listar saldos bancarios |
-| GET | `/api/balance` | Auth | Balance global (excluye anulados) |
+| GET | `/api/balance?fecha=` | Auth | Balance global al cierre de una fecha; vacío = ahora (excluye anulados) |
 | GET | `/api/balance/:agente` | Auth | Balance de un agente (excluye anulados) |
 | GET | `/api/audit` | Admin | Listar auditoría (filtros: entity/action/user/desde/hasta) |
 | POST | `/api/ocr/analyze` | Auth | Analizar imagen con OCR |
@@ -289,23 +291,29 @@ Google Sheets API / In-memory store
 
 | Modo | Condición | Uso |
 |------|-----------|-----|
-| **Google Sheets** | `GOOGLE_APPLICATION_CREDENTIALS` y `GOOGLE_SHEET_ID` configurados | Producción |
-| **In-memory** | Variables no configuradas | Desarrollo local |
+| **Google Sheets** | `GOOGLE_CREDENTIALS_BASE64` y `GOOGLE_SHEET_ID` configurados | Producción y dev con Sheets reales |
+| **In-memory** | Variables no configuradas | Desarrollo local sin credenciales |
+
+> El backend ya no lee `GOOGLE_APPLICATION_CREDENTIALS`. El service account JSON se inyecta codificado en base64 vía la variable `GOOGLE_CREDENTIALS_BASE64` (decodificada en memoria por `config/sheetsClient.js`).
 
 El `sheetsRepository.js` abstrae ambos modos transparentemente.
 
 ### 4.2 Modelo de Datos
 Ver sección 4 del [PRD](./PRD.md) para el modelo completo de hojas y headers.
 
+Además de las hojas operativas, `config_settings` centraliza ajustes singleton del sistema. El caso vigente es `caja_inicio_mes`, usado por el balance acumulado para fijar la caja base de cada mes. Su lectura y actualización se exponen por `/api/config/settings/:key`.
+
+Ver ADR-023 en [docs/decisions.md](./decisions.md) para el detalle de la semántica de cierre de día y carry-forward.
+
 ### 4.3 Generación de IDs
-Formato: `{PREFIJO}-{timestamp}-{counter}`
+Formato: `{PREFIJO}-{uuid}`
 - `PAG-` para pagos
 - `ING-` para ingresos
 - `GAS-` para gastos
 - `BAN-` para bancos
 - `AUD-` para auditoría
 
-> ⚠️ **Nota**: Los counters son in-memory y se resetean al reiniciar el servidor. En producción con Sheets, el timestamp proporciona unicidad suficiente.
+> ⚠️ **Nota**: La lectura y búsqueda siguen aceptando IDs legacy ya persistidos. Los nuevos registros usan `crypto.randomUUID()` para reducir el riesgo de colisiones en reinicios o escalado.
 
 ---
 
@@ -391,6 +399,7 @@ Frontend (localhost:3000)  →  Backend (localhost:3001)
 | Backend: saldos bancarios | ✅ Completo | Con upsert + auditoría |
 | Backend: balance calculation | ✅ Completo | Global + por agente |
 | Backend: config CRUD | ✅ Completo | CRUD + seed data + deleteRow real + auditoría |
+| Backend: config settings | 🆕 En curso | Hoja singleton `config_settings` + endpoint dedicado para `caja_inicio_mes` |
 | Backend: OCR pipeline | ✅ Completo | Vision + Tesseract fallback |
 | Backend: auditoría | ✅ Completo | Append-only |
 | Backend: error handling | ✅ Completo | AppError hierarchy + retry con backoff |
@@ -399,7 +408,7 @@ Frontend (localhost:3000)  →  Backend (localhost:3001)
 | Frontend: design system | ✅ Completo | Dark theme, gold accents, responsive |
 | Frontend: login | ✅ Completo | username/password + JWT almacenado + redirección |
 | Frontend: sidebar + nav | ✅ Completo | Badge rol + logout + hamburger mobile (rol selector eliminado) |
-| Frontend: dashboard balance | ✅ Completo | 4 cards + 2 tablas + skeleton (excluye anulados) |
+| Frontend: dashboard balance | ✅ Completo | 5 KPIs + 3 tablas + date picker + skeleton (excluye anulados) |
 | Frontend: paginación de listados | ✅ Completo | PaginationControls unificado en pagos, ingresos, gastos, bancos y audit |
 | Frontend: refresh tokens | ✅ Completo | Interceptor de 401 renueva sesión con refresh token |
 | Frontend: formulario pagos | ✅ Completo | Con OCR + validación + skeleton + filtros + editar/anular |
@@ -423,12 +432,19 @@ Frontend (localhost:3000)  →  Backend (localhost:3001)
 
 ---
 
-## 9. Pendientes Pre-Producción
+## 9. Estado de Despliegue y Deuda Técnica
 
-### Bloquean el pase a producción (Sprint 11)
-1. **Ejecución de scripts de migración** — `migrateAuthUsersToAgentes.js` y `migrateBancoId.js` deben ejecutarse en modo `--dry-run` + `--commit` contra la hoja de producción antes del primer deploy (TICKET-055)
-2. **Despliegue Vercel + Railway** — frontend en Vercel, backend en Railway; configurar variables de entorno, CORS y credenciales Google (TICKET-056)
+### Producción
+- **Backend**: Railway, expone puerto inyectado por la plataforma, host `0.0.0.0`. Credenciales Google vía `GOOGLE_CREDENTIALS_BASE64`.
+- **Frontend**: Vercel. Proxy `/api/*` → `BACKEND_INTERNAL_URL` resuelto en build time.
+- **Comprobantes**: Cloudflare R2 con CORS restringido al dominio Vercel.
+- **Migraciones pre-producción**: ejecutadas (TICKET-055).
 
-### Deuda técnica menor (no bloquean)
-- `config_auth_users` en `sheetsSchema.js` marcada como deprecada; la hoja en producción se renombrará a `_deprecated` durante TICKET-055
-- IDs basados en timestamp (ADR-009): aceptable para MVP; considerar `crypto.randomUUID()` en el futuro
+### Deuda técnica activa (Sprint 12)
+- **TICKET-057** — Cambios sin commitear en `sheetsRepository.js` que migran headers legacy de `ingresos`, `gastos` y `bancos` (hotfix detectado en producción). Falta integrarlos al control de versiones y al pipeline.
+- **TICKET-058** — Procedimiento de backup y rollback para Google Sheets y Cloudflare R2 sin documentar.
+- **TICKET-059 (P3)** — Resuelto: IDs migrados a `crypto.randomUUID()` en `pagos`, `ingresos`, `gastos`, `bancos`, `audit` y `config_*`.
+
+### Deuda menor aceptada
+- `config_auth_users` permanece en `DEPRECATED_SHEETS_SCHEMA` solo para retrocompatibilidad de lectura.
+- `spa.traineddata` (~3.3 MB) commiteado en `backend/` para soportar OCR fallback offline.

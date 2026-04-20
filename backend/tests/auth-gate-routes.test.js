@@ -23,7 +23,7 @@ test('los GET de movimientos y balance requieren verifyToken + requireAuth', () 
   assert.deepStrictEqual(getRouteStack(gastosRouter, 'get', '/'), ['verifyToken', 'requireAuth', 'getPagedAndFiltered']);
   assert.deepStrictEqual(getRouteStack(bancosRouter, 'get', '/scoped'), ['verifyToken', 'requireAuth', 'getScoped']);
   assert.deepStrictEqual(getRouteStack(bancosRouter, 'get', '/'), ['verifyToken', 'requireAuth', 'getPagedAndFiltered']);
-  assert.deepStrictEqual(getRouteStack(balanceRouter, 'get', '/'), ['verifyToken', 'requireAuth', 'getGlobal']);
+  assert.deepStrictEqual(getRouteStack(balanceRouter, 'get', '/'), ['verifyToken', 'requireAuth', 'validateQueryMiddleware', 'getGlobal']);
   assert.deepStrictEqual(getRouteStack(balanceRouter, 'get', '/:agente'), ['verifyToken', 'requireAuth', 'getByAgent']);
 });
 
@@ -31,6 +31,8 @@ test('config mantiene el listado general publico y protege las tablas', () => {
   const configRouter = require('../routes/config.routes');
 
   assert.deepStrictEqual(getRouteStack(configRouter, 'get', '/'), ['getFullConfig']);
+  assert.deepStrictEqual(getRouteStack(configRouter, 'get', '/settings/:key'), ['verifyToken', 'requireAuth', 'getSetting']);
+  assert.deepStrictEqual(getRouteStack(configRouter, 'put', '/settings/:key'), ['verifyToken', 'requireAdmin', 'validateSettingUpsert', 'upsertSetting']);
   assert.deepStrictEqual(getRouteStack(configRouter, 'get', '/:table'), ['verifyToken', 'requireAdmin', 'getTable']);
   assert.deepStrictEqual(getRouteStack(configRouter, 'put', '/:table/:id/password'), ['verifyToken', 'requireAdmin', 'changePassword']);
 });

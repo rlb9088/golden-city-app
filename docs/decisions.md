@@ -1,6 +1,6 @@
 # Decisiones Técnicas — Golden City Backoffice
 
-> **Versión**: 1.5  
+> **Versión**: 1.6  
 > **Última actualización**: 2026-04-19
 
 Este documento registra las decisiones técnicas clave del proyecto, con su contexto, alternativas evaluadas y razón de la elección. Se actualiza conforme evoluciona el proyecto.
@@ -120,6 +120,9 @@ Pipeline de 3 niveles:
 - Regex financiero extrae montos y fechas del texto crudo
 - Discrepancias entre OCR e input manual generan warnings (nunca bloquean)
 
+### Nota post-deploy (2026-04-19)
+En producción se detectó que el pipeline OCR fallaba al no encontrar la ruta legacy de credenciales. Se ajustó `ocr.service.js` para detectar `GOOGLE_CREDENTIALS_BASE64` y caer a Tesseract sin abortar (commit `1ef30ee`). El comportamiento documentado se mantiene: el OCR nunca bloquea el registro.
+
 ---
 
 ## ADR-006: Patrón Controller → Service → Repository
@@ -185,11 +188,12 @@ Usar Zod para validar todas las entradas de escritura en el backend.
 
 ## ADR-009: IDs Basados en Timestamp
 
-**Estado**: ⚠️ Aceptable para MVP  
+**Estado**: ⛔ Reemplazado por TICKET-059  
 **Fecha**: 2026-04-08  
+**Reemplazado**: 2026-04-20
 
 ### Decisión
-Los IDs se generan como `{PREFIJO}-{Date.now()}-{counter}`, donde el counter se resetea al reiniciar el servidor.
+Los IDs se generaban como `{PREFIJO}-{Date.now()}-{counter}`, donde el counter se reseteaba al reiniciar el servidor.
 
 ### Razones
 - Simple, sin dependencias
@@ -201,7 +205,7 @@ Los IDs se generan como `{PREFIJO}-{Date.now()}-{counter}`, donde el counter se 
 - No son UUIDs estándar
 
 ### Plan futuro
-Para producción robusta, considerar `crypto.randomUUID()` o `nanoid`.
+Migrado a `crypto.randomUUID()` en TICKET-059. Mantener este ADR solo como referencia histórica.
 
 ---
 
@@ -540,6 +544,38 @@ Los movimientos y saldos bancarios referencian bancos por `banco_id`. El nombre 
 
 ---
 
+## ADR-023: Balance con semántica de cierre de día y carry-forward bancario
+
+**Estado**: ✅ Vigente  
+**Fecha**: 2026-04-20
+
+### Contexto
+El dashboard de Balance necesita responder tanto a un cierre histórico por fecha como al estado "ahora". Además, los bancos admin no siempre tienen un snapshot para cada día, por lo que hace falta una regla estable para reconstruir el saldo cuando falta el registro del cierre exacto.
+
+### Alternativas evaluadas
+
+| Opción | Pros | Contras |
+|--------|------|---------|
+| Balance acumulado simple sin fecha | Fácil de calcular | No permite cierres históricos ni reconciliación por día |
+| Recalcular bancos solo con movimientos | Evita depender de snapshots | Pierde la semántica de cierre contable y complica correcciones manuales |
+| **Cierre de día + carry-forward bancario** | Reproduce el estado al cierre de una fecha y soporta vista "ahora" | Requiere normalización de fechas, snapshots consistentes y reglas claras de fallback |
+
+### Decisión
+El sistema define el Balance como una fotografía al cierre de una fecha `D`. Si no se envía fecha, se usa la fecha actual en timezone Lima y se interpreta como modo "ahora". Los bancos admin se resuelven por snapshot de cierre con carry-forward del registro más reciente anterior; si no existe snapshot para hoy, se completa con movimientos de hoy del banco admin. Las cajas de agentes se calculan por acumulado de ingresos menos pagos hasta `D`, y el acumulado mensual descuenta `caja_inicio_mes` desde `config_settings`.
+
+### Consecuencias
+- El dashboard puede mostrar cierres consistentes y comparables por fecha.
+- El cálculo bancario deja de depender de tener un snapshot perfecto para cada día.
+- `caja_inicio_mes` se convierte en la referencia contable para el acumulado mensual.
+- Las fechas deben normalizarse siempre con la timezone del negocio para evitar desfasajes entre backend y UI.
+
+### Mitigaciones
+- Centralizar la normalización temporal en `backend/config/timezone.js`.
+- Mantener `config_settings` como fuente única para valores operativos como `caja_inicio_mes`.
+- Excluir siempre registros con `estado='anulado'` para conservar consistencia con el resto del sistema.
+
+---
+
 ## Registro de Cambios
 
 | Fecha | ADR | Cambio |
@@ -551,3 +587,6 @@ Los movimientos y saldos bancarios referencian bancos por `banco_id`. El nombre 
 | 2026-04-17 | 018-019 | ADRs para comprobantes en Drive e importación batch; revisión post-UAT Sprint 6 |
 | 2026-04-18 | 018, 020-022 | ADR-018 superseded y nuevas decisiones para R2, identidad unificada y `banco_id` FK |
 | 2026-04-19 | 014 | ADR-014 actualizado: fuente de identidad migrada de `config_auth_users` a `config_agentes` per ADR-021 |
+| 2026-04-19 | 005 | Nota de fix post-deploy: OCR fallback robusto frente a credenciales BASE64 (commit `1ef30ee`) |
+| 2026-04-20 | 023 | ADR-023 agregado: Balance con semántica de cierre de día y carry-forward bancario |
+| 2026-04-19 | — | Cierre de Sprint 11: TICKET-055 y TICKET-056 ejecutados; backend en Railway, frontend en Vercel, R2 activo |

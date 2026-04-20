@@ -12,6 +12,19 @@ async function getTable(req, res) {
   res.json({ status: 'success', data });
 }
 
+async function getSetting(req, res) {
+  const { key } = req.params;
+  const data = await configService.getSetting(key);
+  res.json({ status: 'success', data });
+}
+
+async function upsertSetting(req, res) {
+  const { key } = req.params;
+  const payload = req.validatedData || req.body;
+  const record = await configService.upsertSetting(key, payload, req.auth.user);
+  res.json({ status: 'success', data: record });
+}
+
 async function addToTable(req, res) {
   const { table } = req.params;
   const record = await configService.addToTable(table, req.body, req.auth.user);
@@ -58,4 +71,14 @@ async function importBatch(req, res) {
   res.status(201).json({ status: 'success', data: results, count: results.length });
 }
 
-module.exports = { getFullConfig, getTable, addToTable, updateInTable, changePassword, removeFromTable, importBatch };
+module.exports = {
+  getFullConfig,
+  getTable,
+  getSetting,
+  upsertSetting,
+  addToTable,
+  updateInTable,
+  changePassword,
+  removeFromTable,
+  importBatch,
+};

@@ -39,6 +39,10 @@
   animation: fadeIn 0.3s ease;
 }
 
+.config-section--settings {
+  margin-bottom: var(--space-lg);
+}
+
 .config-section-header {
   display: flex;
   justify-content: space-between;
@@ -50,6 +54,39 @@
   font-size: 1.25rem;
   font-weight: 600;
   color: var(--text);
+}
+
+.settings-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 220px) auto auto;
+  gap: var(--space-md);
+  align-items: end;
+}
+
+.settings-summary {
+  display: grid;
+  gap: 0.35rem;
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgba(234, 179, 8, 0.08), rgba(234, 179, 8, 0.03));
+  border: 1px solid rgba(234, 179, 8, 0.15);
+  min-height: 100%;
+}
+
+.settings-summary-label {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.settings-loading {
+  margin-top: var(--space-sm);
 }
 
 /* Inline form for adding new records */
@@ -203,6 +240,10 @@
 }
 
 @media (max-width: 768px) {
+  .settings-form {
+    grid-template-columns: 1fr;
+  }
+
   .add-row-form {
     flex-direction: column;
     align-items: stretch;
@@ -228,5 +269,13 @@
   .modal-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .settings-actions {
+    justify-content: stretch;
+  }
+
+  .settings-actions .btn {
+    width: 100%;
   }
 }

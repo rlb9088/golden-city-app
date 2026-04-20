@@ -1,11 +1,10 @@
 const repo = require('../repositories/sheetsRepository');
 const { nowLima } = require('../config/timezone');
 const { paginateItems } = require('../utils/pagination');
+const { createPrefixedId } = require('../utils/id');
 
 const SHEET_NAME = 'audit';
 const HEADERS = ['id', 'action', 'entity', 'user', 'timestamp', 'changes'];
-
-let auditCounter = 1;
 
 function normalizeText(value) {
   return String(value ?? '').trim().toLowerCase();
@@ -120,7 +119,7 @@ function matchesText(value, filterValue) {
  */
 async function log(action, entity, user, changes = {}) {
   const entry = {
-    id: `AUD-${Date.now()}-${auditCounter++}`,
+    id: createPrefixedId('AUD'),
     action,
     entity,
     user: user || 'system',

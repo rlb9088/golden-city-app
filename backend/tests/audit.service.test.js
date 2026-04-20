@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-function loadAuditService({ getAll }) {
+function loadAuditService({ getAll, append = async () => ({}) }) {
   const repoPath = require.resolve('../repositories/sheetsRepository');
   const servicePath = require.resolve('../services/audit.service');
 
@@ -14,7 +14,7 @@ function loadAuditService({ getAll }) {
     loaded: true,
     exports: {
       getAll,
-      append: async () => ({}),
+      append,
       update: async () => ({}),
       deleteRow: async () => ({}),
       findByColumn: async () => [],
@@ -92,4 +92,25 @@ test('getFiltered aplica filtros por entidad, accion, usuario y rango de fecha',
   });
 
   assert.deepStrictEqual(result.map((entry) => entry.id), ['AUD-2']);
+});
+
+test('log genera IDs con prefijo AUD y UUIDs unicos', async () => {
+  const appendedEntries = [];
+  const auditService = loadAuditService({
+    getAll: async () => ([]),
+    append: async (_sheetName, entry) => {
+      appendedEntries.push(entry);
+      return {};
+    },
+  });
+
+  const first = await auditService.log('create', 'pago', 'Admin', { monto: 10 });
+  const second = await auditService.log('update', 'gasto', 'Admin', { monto: 20 });
+
+  const uuidPattern = /^AUD-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  assert.match(first.id, uuidPattern);
+  assert.match(second.id, uuidPattern);
+  assert.notEqual(first.id, second.id);
+  assert.deepStrictEqual(appendedEntries.map((entry) => entry.id), [first.id, second.id]);
 });

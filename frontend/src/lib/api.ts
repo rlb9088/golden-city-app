@@ -26,6 +26,12 @@ export interface ConfigBanco {
   propietario_id?: string;
 }
 
+export interface ConfigSetting {
+  key: string;
+  value: string | number;
+  fecha_efectiva: string;
+}
+
 export interface StoredAuthSession {
   accessToken: string;
   refreshToken: string;
@@ -446,6 +452,20 @@ export async function changeAgentPassword(id: string, password: string) {
   });
 }
 
+export async function getSetting(key: string) {
+  return request<{ status: string; data: ConfigSetting }>(`/api/config/settings/${encodeURIComponent(key)}`);
+}
+
+export async function updateSetting(key: string, value: string | number, fechaEfectiva: string) {
+  return request<{ status: string; data: ConfigSetting }>(`/api/config/settings/${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      value,
+      fecha_efectiva: fechaEfectiva,
+    }),
+  });
+}
+
 // Pagos
 export async function createPago(data: {
   usuario: string;
@@ -684,17 +704,54 @@ export interface AgentBalance {
   balance: number;
 }
 
-export interface GlobalBalance {
-  agents: AgentBalance[];
-  bancos: { banco: string; saldo: string }[];
-  totalCajas: number;
-  totalBancos: number;
-  totalGastos: number;
-  global: number;
+export interface BalanceBankDetail {
+  banco_id: string;
+  banco: string;
+  saldo: number;
 }
 
-export async function getBalance() {
-  return request<{ status: string; data: GlobalBalance }>('/api/balance');
+export interface BalanceAgentDetail {
+  agente: string;
+  bancos: BalanceBankDetail[];
+}
+
+export interface BalanceExpenseDetail {
+  categoria: string;
+  subcategoria: string;
+  monto: number;
+}
+
+export interface BalanceSnapshot {
+  fecha: string | null;
+  bancosAdmin: {
+    total: number;
+    detalle: BalanceBankDetail[];
+  };
+  cajasAgentes: {
+    total: number;
+    detalle: BalanceAgentDetail[];
+  };
+  totalGastos: {
+    total: number;
+    detalle: BalanceExpenseDetail[];
+  };
+  balanceDia: number;
+  balanceAcumulado: number;
+  cajaInicioMes: number;
+}
+
+/** @deprecated Use BalanceSnapshot instead. */
+export type GlobalBalance = BalanceSnapshot;
+
+export async function getBalance(fecha?: string): Promise<{ data: BalanceSnapshot }> {
+  const params = new URLSearchParams();
+  if (fecha && String(fecha).trim()) {
+    params.set('fecha', String(fecha).trim());
+  }
+
+  const query = params.toString();
+  const suffix = query ? `?${query}` : '';
+  return request<{ data: BalanceSnapshot }>(`/api/balance${suffix}`);
 }
 
 export async function getAgentBalance(agente: string) {

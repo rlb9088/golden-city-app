@@ -1,6 +1,6 @@
 # Backlog - Golden City Backoffice MVP
 
-> **Ultima actualizacion**: 2026-04-19
+> **Ultima actualizacion**: 2026-04-20
 
 ---
 
@@ -8,7 +8,7 @@
 
 | Total | Completados | En progreso/Parcial | Pendientes |
 |-------|-------------|---------------------|------------|
-| 56 | 54 | 0 | 2 |
+| 69 | 57 | 0 | 12 |
 
 ---
 
@@ -150,14 +150,45 @@
 
 ---
 
-## Sprint 11 - Pre-producción y Despliegue (🔴 Pendiente)
+## Sprint 11 - Pre-producción y Despliegue (✅ Completado)
 
 | # | Ticket | Estado | Esfuerzo | Prioridad |
 |---|--------|--------|----------|-----------|
 | 055 | [Ejecución de migraciones pre-producción](./TICKET-055-migraciones-preproduccion.md) | ✅ | ~2h | P0 |
-| 056 | [Despliegue a producción — Vercel + Railway](./TICKET-056-deploy-produccion.md) | 🔴 | ~3h | P0 |
+| 056 | [Despliegue a producción — Vercel + Railway](./TICKET-056-deploy-produccion.md) | ✅ | ~3h | P0 |
 
-> **Nota Sprint 11**: TICKET-055 es bloqueante de TICKET-056. Los scripts de migración deben ejecutarse contra la hoja de producción antes del primer deploy.
+> **Nota Sprint 11**: cerrado. Backend en Railway y frontend en Vercel operativos (commits `02395cc`, `d0c79a6`, `9746cbb`, `1ef30ee`).
+
+---
+
+## Sprint 12 - Estabilización post-deploy (🔴 Pendiente)
+
+| # | Ticket | Estado | Esfuerzo | Prioridad |
+|---|--------|--------|----------|-----------|
+| 057 | [Commitear hotfix migración headers legacy](./TICKET-057-commit-legacy-schema-hotfix.md) | 🔴 | ~30min | P1 |
+| 058 | [Backup y rollback de Sheets + R2](./TICKET-058-backup-rollback-procedure.md) | 🔴 | ~2h | P1 |
+| 059 | [Migrar IDs a `crypto.randomUUID()`](./TICKET-059-uuid-ids.md) | 🔴 | ~2h | P3 |
+
+> **Nota Sprint 12**: 057 desbloquea CI/CD (cambios pendientes en working tree). 058 recomendado antes de pruebas reales con datos sensibles. 059 opcional.
+
+---
+
+## Sprint 13 - Rediseño módulo Balance (🔴 Pendiente)
+
+| # | Ticket | Estado | Esfuerzo | Prioridad |
+|---|--------|--------|----------|-----------|
+| 060 | [Tabla `config_settings` + endpoint `caja_inicio_mes`](./TICKET-060-config-settings-table.md) | 🔴 | ~2h | P0 |
+| 061 | [Helper `getAdminBankIds()`](./TICKET-061-admin-bank-ids-helper.md) | 🔴 | ~1.5h | P0 |
+| 062 | [Rediseño `balance.service.js` con semántica cierre de día](./TICKET-062-balance-service-redesign.md) | 🔴 | ~5h | P0 |
+| 063 | [`/api/balance` acepta `?fecha=YYYY-MM-DD`](./TICKET-063-balance-route-date-param.md) | 🔴 | ~1h | P0 |
+| 064 | [Tests unitarios de `balance.service`](./TICKET-064-balance-service-tests.md) | 🔴 | ~3h | P0 |
+| 065 | [Frontend `lib/api.ts`: tipos + filtro de fecha](./TICKET-065-frontend-api-balance-types.md) | 🔴 | ~1h | P1 |
+| 066 | [UI Balance rediseñada (date-picker + 5 KPIs + 3 desgloses)](./TICKET-066-frontend-balance-ui.md) | 🔴 | ~4h | P1 |
+| 067 | [UI Configuración: editor `caja_inicio_mes`](./TICKET-067-frontend-config-caja-inicio-mes.md) | 🔴 | ~1.5h | P1 |
+| 068 | [Actualización documentaria del rediseño](./TICKET-068-docs-balance-redesign.md) | 🔴 | ~1.5h | P2 |
+| 069 | [E2E + checklist UAT](./TICKET-069-balance-e2e-uat.md) | ✅ | ~2h | P2 |
+
+> **Nota Sprint 13**: Orden sugerido 060 → 061 → 062 → 063 → 064 → 065 → 066 → 067 → 068 → 069. Antes de ejecutar 061 y 062 validar supuestos pendientes (criterio de "admin" en `config_bancos`, campos de fecha usados para "durante el día").
 
 ---
 

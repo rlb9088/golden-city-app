@@ -21,13 +21,16 @@ This repo now includes a Docker-based deploy prep flow and a local startup scrip
 
 Backend:
 
-- `GOOGLE_APPLICATION_CREDENTIALS`
+- `GOOGLE_CREDENTIALS_BASE64` (service account JSON encoded as base64 — the only supported credential variable)
 - `GOOGLE_SHEET_ID`
 - `JWT_SECRET`
 - `AUTH_BOOTSTRAP_ADMIN_PASSWORD`
 - `AUTH_BOOTSTRAP_AGENT_PASSWORD`
 - `CORS_ORIGIN`
+- `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_URL` (required for receipt persistence)
 - `LOG_DIR` optional. Defaults to `backend/logs`
+
+> `GOOGLE_APPLICATION_CREDENTIALS` is no longer read by the backend. Mounting a JSON file is supported only as a developer convenience: encode it to base64 and pass it via `GOOGLE_CREDENTIALS_BASE64`.
 
 Frontend:
 
@@ -46,7 +49,7 @@ Run it locally:
 ```bash
 docker run --rm -p 3000:3000 -p 3001:3001 \
   -v $(pwd)/backend/logs:/app/backend/logs \
-  -e GOOGLE_APPLICATION_CREDENTIALS=/app/backend/keys/google-vision.json \
+  -e GOOGLE_CREDENTIALS_BASE64=$(base64 -w0 backend/keys/google-vision.json) \
   -e GOOGLE_SHEET_ID=your_sheet_id \
   -e JWT_SECRET=your_long_random_secret \
   -e AUTH_BOOTSTRAP_ADMIN_PASSWORD=your_admin_password \
@@ -205,3 +208,92 @@ Keep these values outside the repo and outside the container image:
 - `GOOGLE_CREDENTIALS_BASE64`
 
 On GCP, use Secret Manager or a mounted secret file for the service account JSON.
+
+## Backup and Rollback
+
+This project uses immutable snapshot prefixes in Cloudflare R2 instead of relying on native object versioning. The current Cloudflare R2 docs expose lifecycle and bucket-lock retention controls, but this repo treats backups as daily copies stored under `backups/` so restore is deterministic.
+
+### Cadence
+
+- Sheets: daily automated backup, plus a manual run before every migration or schema change.
+- R2 receipts: daily automated snapshot of the live `receipts/` prefix.
+- Restore test: run a dry-run at least once per quarter.
+
+### Location
+
+- Sheets snapshots: `backups/sheets/YYYY-MM-DD/`
+- R2 snapshots: `backups/r2/YYYY-MM-DD/`
+- Both jobs use the existing production R2 bucket configured in `R2_BUCKET`.
+
+### Commands
+
+Sheets backup:
+
+```bash
+cd backend
+npm run backup:sheets
+```
+
+R2 backup:
+
+```bash
+cd backend
+npm run backup:r2
+```
+
+### GitHub Actions Cron
+
+The repository includes `.github/workflows/backup-operations.yml` as the automated daily backup example.
+
+- It runs every day at `01:30 UTC`.
+- It also supports manual execution via `workflow_dispatch`.
+- Required secrets:
+  - `GOOGLE_CREDENTIALS_BASE64`
+  - `GOOGLE_SHEET_ID`
+  - `R2_ACCOUNT_ID`
+  - `R2_ACCESS_KEY_ID`
+  - `R2_SECRET_ACCESS_KEY`
+  - `R2_BUCKET`
+  - `R2_PUBLIC_URL`
+
+Use the manual dispatch before migrations or other changes that warrant an extra snapshot.
+
+### Restore Procedure
+
+#### Sheets
+
+1. Create a clean target spreadsheet or let the restore command create a new one.
+2. Run a dry-run first:
+
+```bash
+cd backend
+npm run restore:sheets -- --snapshot-key backups/sheets/YYYY-MM-DD/spreadsheet.json --dry-run
+```
+
+3. If the dry-run looks correct, run the same command without `--dry-run`.
+4. The restore command creates a fresh spreadsheet and prints the new `spreadsheetId`.
+5. Update `GOOGLE_SHEET_ID` to the new spreadsheet id and redeploy.
+
+#### R2 receipts
+
+1. Identify the object to recover from the R2 backup manifest or from the `comprobante_file_id` stored in Sheets.
+2. Run a dry-run first:
+
+```bash
+cd backend
+npm run restore:r2 -- --source-key backups/r2/YYYY-MM-DD/receipts/<file> --dry-run
+```
+
+3. If the source key is correct, rerun without `--dry-run` to copy the object back to the live `receipts/` prefix.
+4. The restored object keeps the original `comprobante_file_id` when the destination key matches the live path.
+
+### Retention
+
+- Sheets backups: keep at least 30 days of daily snapshots, and always keep the most recent pre-migration snapshot.
+- R2 snapshots: keep 90 days of daily snapshots.
+- Apply a Cloudflare R2 bucket lock or lifecycle policy to the `backups/` prefix if your account permits it.
+
+### Notes
+
+- No new environment variables were introduced by this ticket.
+- The restore dry-run is the quarterly operational check required by this ticket.

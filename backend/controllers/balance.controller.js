@@ -1,7 +1,7 @@
 const balanceService = require('../services/balance.service');
 
 async function getGlobal(req, res) {
-  const balance = await balanceService.getGlobalBalance();
+  const balance = await balanceService.getBalanceAt({ fecha: req.validatedQuery?.fecha || null });
   res.json({ status: 'success', data: balance });
 }
 

@@ -1,13 +1,19 @@
 const repo = require('../repositories/sheetsRepository');
 const audit = require('./audit.service');
-const { validateReferences, getConfigBancoById, getTable } = require('./config.service');
+const {
+  validateReferences,
+  getConfigBancoById,
+  getTable,
+  getAdminBankIds,
+  getAgentBankIds,
+  classifyBanco,
+} = require('./config.service');
 const { ForbiddenError } = require('../utils/appError');
 const { paginateItems } = require('../utils/pagination');
+const { createPrefixedId } = require('../utils/id');
 
 const SHEET_NAME = 'bancos';
 const HEADERS = ['id', 'fecha', 'banco_id', 'banco', 'saldo'];
-
-let bancoCounter = 1;
 
 function normalizeText(value) {
   return String(value ?? '').trim().toLowerCase();
@@ -160,7 +166,7 @@ async function upsert(data, caller) {
 
   // Create new
   const banco = {
-    id: `BAN-${Date.now()}-${bancoCounter++}`,
+    id: createPrefixedId('BAN'),
     fecha: data.fecha,
     banco_id: bancoDetails.banco_id,
     banco: bancoDetails.banco,
@@ -224,4 +230,7 @@ module.exports = {
   getPagedAndFiltered,
   getScopedBancos,
   getLatest,
+  getAdminBankIds,
+  getAgentBankIds,
+  classifyBanco,
 };

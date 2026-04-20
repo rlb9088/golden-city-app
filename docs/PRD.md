@@ -1,7 +1,7 @@
 # PRD — Golden City Backoffice MVP
 
-> **Versión**: 1.1  
-> **Última actualización**: 2026-04-15  
+> **Versión**: 1.2  
+> **Última actualización**: 2026-04-20  
 > **Estado**: En desarrollo activo
 
 ---
@@ -115,16 +115,29 @@ Los "usuarios" dentro del contexto de pagos son los **jugadores** que reciben di
 ### 3.5 Balance / Dashboard
 **Propósito**: Vista consolidada del estado financiero del negocio en tiempo real.
 
-**Fórmula Global**:
-```
-Balance Global = Σ(balance_agentes) + Σ(saldos_bancos_último) - Σ(gastos)
-Balance Agente = Σ(ingresos_agente) - Σ(pagos_agente)
+**Semántica**:
+- El dashboard permite filtrar por fecha de cierre.
+- Si el campo de fecha se deja vacío, la vista calcula el estado "al momento" usando la fecha actual en timezone Lima.
+- Para bancos admin se usa cierre por snapshot diario con carry-forward cuando falta registro para un banco en la fecha elegida.
+- `caja_inicio_mes` se lee desde `config_settings` y actúa como la caja base del acumulado mensual.
+- Ver ADR-023 en [docs/decisions.md](./decisions.md) para la semántica contable completa.
+
+**Fórmulas**:
+```text
+BancosAdmin(D) = suma de saldos de bancos admin al cierre de D
+CajasAgentes(D) = suma(ingresos <= D) - suma(pagos <= D)
+TotalGastos(D) = suma(gastos activos <= D)
+GastosDelDia(D) = suma(gastos activos en D)
+BalanceDelDia(D) = (BancosAdmin(D) + CajasAgentes(D)) - (BancosAdmin(D-1) + CajasAgentes(D-1)) - GastosDelDia(D)
+BalanceAcumulado(D) = (BancosAdmin(D) + CajasAgentes(D)) - TotalGastos(D) - caja_inicio_mes
 ```
 
 **Vistas**:
-- 4 cards de resumen: Balance Global, Total Cajas, Total Bancos, Total Gastos
-- Tabla: Balance por agente (ingresos, pagos, balance neto)
-- Tabla: Saldos bancarios actuales (último registro por banco)
+- 5 cards de resumen: Bancos admin, Cajas de agentes, Total gastos, Balance del día, Balance acumulado.
+- Tabla: Balance por agente con sus bancos desglosados.
+- Tabla: Balance por banco admin.
+- Tabla: Balance por categoría y subcategoría de gasto.
+- Cada tabla debe tener empty state propio cuando no haya datos.
 
 **Estado**: ✅ Implementado
 
@@ -165,6 +178,7 @@ Balance Agente = Σ(ingresos_agente) - Σ(pagos_agente)
 | `config_agentes` | id, nombre | Agentes operadores |
 | `config_categorias` | id, categoria, subcategoria | Categorías de gastos |
 | `config_bancos` | id, nombre, propietario | Bancos y wallets |
+| `config_settings` | key, value, fecha_efectiva, actualizado_por, actualizado_en | Ajustes singulares del sistema |
 | `config_cajas` | id, nombre | Puntos de caja |
 | `config_tipos_pago` | id, nombre | Métodos de pago |
 | `config_usuarios` | id, nombre | Jugadores (para autocompletado) |
@@ -174,6 +188,7 @@ Balance Agente = Σ(ingresos_agente) - Σ(pagos_agente)
 - Eliminar registro
 - Importación masiva (CSV/texto) para usuarios (jugadores)
 - Seed data por defecto cuando las tablas están vacías
+- Ajustes singleton en `config_settings` para valores operativos como `caja_inicio_mes`
 
 **Estado**: ✅ Implementado
 
@@ -230,6 +245,7 @@ Cada "tabla" es una hoja (sheet) dentro de un mismo spreadsheet:
 | `config_agentes` | id, nombre |
 | `config_categorias` | id, categoria, subcategoria |
 | `config_bancos` | id, nombre, propietario |
+| `config_settings` | key, value, fecha_efectiva, actualizado_por, actualizado_en |
 | `config_cajas` | id, nombre |
 | `config_tipos_pago` | id, nombre |
 | `config_usuarios` | id, nombre |

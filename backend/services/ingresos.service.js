@@ -5,11 +5,10 @@ const { nowLima } = require('../config/timezone');
 const { validateReferences, getConfigBancoById } = require('./config.service');
 const { BadRequestError, ForbiddenError, NotFoundError } = require('../utils/appError');
 const { paginateItems } = require('../utils/pagination');
+const { createPrefixedId } = require('../utils/id');
 
 const SHEET_NAME = 'ingresos';
 const HEADERS = ['id', 'estado', 'agente', 'banco_id', 'banco', 'monto', 'fecha_movimiento', 'fecha_registro'];
-
-let ingresoCounter = 1;
 
 function normalizeText(value) {
   return String(value ?? '').trim().toLowerCase();
@@ -232,7 +231,7 @@ async function create(data, caller) {
   const bancoDetails = await assertBancoOwnershipForAgent(data.banco_id, targetAgent.id);
 
   const ingreso = {
-    id: `ING-${Date.now()}-${ingresoCounter++}`,
+    id: createPrefixedId('ING'),
     estado: 'activo',
     agente: targetAgent.nombre || data.agente,
     banco_id: bancoDetails.banco_id,

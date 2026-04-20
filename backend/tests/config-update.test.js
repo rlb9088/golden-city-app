@@ -48,6 +48,70 @@ function loadConfigService({ getAll, auditLog }) {
   };
 }
 
+function loadMutableConfigService({ agentes, bancos }) {
+  const repoPath = require.resolve('../repositories/sheetsRepository');
+  const auditPath = require.resolve('../services/audit.service');
+  const servicePath = require.resolve('../services/config.service');
+
+  delete require.cache[servicePath];
+  delete require.cache[repoPath];
+  delete require.cache[auditPath];
+
+  const state = {
+    agentes: agentes.map((row) => ({ ...row })),
+    bancos: bancos.map((row) => ({ ...row })),
+  };
+
+  const updateCalls = [];
+
+  require.cache[repoPath] = {
+    id: repoPath,
+    filename: repoPath,
+    loaded: true,
+    exports: {
+      getAll: async (sheetName) => {
+        if (sheetName === 'config_agentes') {
+          return state.agentes.map((row) => ({ ...row }));
+        }
+
+        if (sheetName === 'config_bancos') {
+          return state.bancos.map((row) => ({ ...row }));
+        }
+
+        return [];
+      },
+      deleteRow: async () => ({}),
+      append: async () => ({}),
+      update: async (sheetName, rowIndex, data) => {
+        updateCalls.push({ sheetName, rowIndex, data });
+        const rows = sheetName === 'config_agentes' ? state.agentes : state.bancos;
+        const index = rows.findIndex((row) => row._rowIndex === rowIndex);
+        if (index !== -1) {
+          rows[index] = { ...data };
+        }
+        return { status: 'success', mode: 'memory' };
+      },
+      appendBatch: async () => ({}),
+      findByColumn: async () => [],
+    },
+  };
+
+  require.cache[auditPath] = {
+    id: auditPath,
+    filename: auditPath,
+    loaded: true,
+    exports: {
+      log: async () => ({ id: 'AUD-cache' }),
+    },
+  };
+
+  return {
+    service: require('../services/config.service'),
+    state,
+    updateCalls,
+  };
+}
+
 function loadConfigController({ updateInTable, changePassword }) {
   const servicePath = require.resolve('../services/config.service');
   const controllerPath = require.resolve('../controllers/config.controller');
@@ -437,6 +501,175 @@ test('updateInTable del controller propaga usuario y payload al service', async 
     status: 'success',
     data: { id: 'CJ-1', nombre: 'Caja Central' },
   });
+});
+
+test('getAdminBankIds y classifyBanco distinguen bancos admin, agente y huérfanos', async () => {
+  const { service } = loadConfigService({
+    getAll: async (sheetName) => {
+      if (sheetName === 'config_agentes') {
+        return [
+          {
+            _rowIndex: 2,
+            id: 'AG-1',
+            nombre: 'Administrador',
+            username: 'admin',
+            password_hash: 'hash-1',
+            role: 'admin',
+            activo: true,
+          },
+          {
+            _rowIndex: 3,
+            id: 'AG-2',
+            nombre: 'Agente 2',
+            username: 'agente2',
+            password_hash: 'hash-2',
+            role: 'agent',
+            activo: true,
+          },
+        ];
+      }
+
+      if (sheetName === 'config_bancos') {
+        return [
+          {
+            _rowIndex: 8,
+            id: 'BK-1',
+            nombre: 'Banco Admin',
+            propietario: 'Administrador',
+            propietario_id: 'AG-1',
+          },
+          {
+            _rowIndex: 9,
+            id: 'BK-2',
+            nombre: 'Banco Agente',
+            propietario: 'Agente 2',
+            propietario_id: 'AG-2',
+          },
+          {
+            _rowIndex: 10,
+            id: 'BK-3',
+            nombre: 'Banco Huerfano',
+            propietario: '',
+            propietario_id: '',
+          },
+        ];
+      }
+
+      return [];
+    },
+    auditLog: async () => ({ id: 'AUD-18' }),
+  });
+
+  const adminBankIds = await service.getAdminBankIds();
+  const agentBankIds = await service.getAgentBankIds();
+
+  assert(adminBankIds instanceof Set);
+  assert(agentBankIds instanceof Set);
+  assert.deepStrictEqual([...adminBankIds].sort(), ['BK-1']);
+  assert.deepStrictEqual([...agentBankIds].sort(), ['BK-2']);
+  assert.equal(await service.classifyBanco('BK-1'), 'admin');
+  assert.equal(await service.classifyBanco('BK-2'), 'agente');
+  assert.equal(await service.classifyBanco('BK-3'), 'unknown');
+  assert.equal(await service.classifyBanco('BK-999'), 'unknown');
+});
+
+test('getAdminBankIds retorna un Set vacio cuando no hay bancos admin configurados', async () => {
+  const { service } = loadConfigService({
+    getAll: async (sheetName) => {
+      if (sheetName === 'config_agentes') {
+        return [
+          {
+            _rowIndex: 2,
+            id: 'AG-1',
+            nombre: 'Agente 1',
+            username: 'agente1',
+            password_hash: 'hash-1',
+            role: 'agent',
+            activo: true,
+          },
+        ];
+      }
+
+      if (sheetName === 'config_bancos') {
+        return [
+          {
+            _rowIndex: 8,
+            id: 'BK-1',
+            nombre: 'Banco Agente',
+            propietario: 'Agente 1',
+            propietario_id: 'AG-1',
+          },
+          {
+            _rowIndex: 9,
+            id: 'BK-2',
+            nombre: 'Banco Huerfano',
+            propietario: '',
+            propietario_id: '',
+          },
+        ];
+      }
+
+      return [];
+    },
+    auditLog: async () => ({ id: 'AUD-19' }),
+  });
+
+  const adminBankIds = await service.getAdminBankIds();
+
+  assert(adminBankIds instanceof Set);
+  assert.deepStrictEqual([...adminBankIds], []);
+});
+
+test('getAdminBankIds invalida el cache cuando cambia la configuracion de bancos', async () => {
+  const { service } = loadMutableConfigService({
+    agentes: [
+      {
+        _rowIndex: 2,
+        id: 'AG-1',
+        nombre: 'Administrador',
+        username: 'admin',
+        password_hash: 'hash-1',
+        role: 'admin',
+        activo: true,
+      },
+      {
+        _rowIndex: 3,
+        id: 'AG-2',
+        nombre: 'Agente 2',
+        username: 'agente2',
+        password_hash: 'hash-2',
+        role: 'agent',
+        activo: true,
+      },
+    ],
+    bancos: [
+      {
+        _rowIndex: 8,
+        id: 'BK-1',
+        nombre: 'Banco Admin',
+        propietario: 'Administrador',
+        propietario_id: 'AG-1',
+      },
+      {
+        _rowIndex: 9,
+        id: 'BK-2',
+        nombre: 'Banco Agente',
+        propietario: 'Agente 2',
+        propietario_id: 'AG-2',
+      },
+    ],
+  });
+
+  const initialAdminBankIds = await service.getAdminBankIds();
+  assert.deepStrictEqual([...initialAdminBankIds].sort(), ['BK-1']);
+
+  await service.updateInTable('bancos', 'BK-2', {
+    propietario_id: 'AG-1',
+  }, 'tester');
+
+  const refreshedAdminBankIds = await service.getAdminBankIds();
+  assert.deepStrictEqual([...refreshedAdminBankIds].sort(), ['BK-1', 'BK-2']);
+  assert.equal(await service.classifyBanco('BK-2'), 'admin');
 });
 
 test('changePassword del controller propaga el password al service', async () => {

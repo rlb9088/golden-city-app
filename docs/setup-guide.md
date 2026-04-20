@@ -50,7 +50,7 @@ Abre el JSON descargado y localiza el campo `client_email`. Ese email es el que 
 2. Ponle un nombre identificable, por ejemplo `Golden City Backoffice`.
 3. Copia el `spreadsheetId` de la URL.
 
-### 3.2 Crear las 11 hojas requeridas
+### 3.2 Crear las 12 hojas requeridas
 
 Crea estas hojas con los nombres exactos:
 
@@ -62,24 +62,28 @@ Crea estas hojas con los nombres exactos:
 - `config_agentes`
 - `config_categorias`
 - `config_bancos`
+- `config_settings`
 - `config_cajas`
 - `config_tipos_pago`
 - `config_usuarios`
 
+> La hoja `config_auth_users` quedó deprecada tras la unificación de identidad (ADR-021 / TICKET-054). Si existe en el spreadsheet, déjala renombrada a `config_auth_users_deprecated` o elimínala una vez validada la migración.
+
 ### 3.3 Escribir los headers en fila 1
 
-Usa estos headers exactos por hoja:
+Usa estos headers exactos por hoja (fuente: `backend/config/sheetsSchema.js`):
 
 | Hoja | Headers |
 |------|---------|
-| `pagos` | `id`, `usuario`, `caja`, `banco`, `monto`, `tipo`, `comprobante_url`, `fecha_comprobante`, `fecha_registro`, `agente` |
-| `ingresos` | `id`, `agente`, `banco`, `monto`, `fecha_movimiento`, `fecha_registro` |
-| `gastos` | `id`, `fecha_gasto`, `fecha_registro`, `concepto`, `categoria`, `subcategoria`, `banco`, `monto` |
-| `bancos` | `id`, `fecha`, `banco`, `saldo` |
+| `pagos` | `id`, `estado`, `usuario`, `caja`, `banco_id`, `banco`, `monto`, `tipo`, `comprobante_url`, `comprobante_file_id`, `fecha_comprobante`, `fecha_registro`, `agente` |
+| `ingresos` | `id`, `estado`, `agente`, `banco_id`, `banco`, `monto`, `fecha_movimiento`, `fecha_registro` |
+| `gastos` | `id`, `estado`, `fecha_gasto`, `fecha_registro`, `concepto`, `categoria`, `subcategoria`, `banco_id`, `banco`, `monto` |
+| `bancos` | `id`, `fecha`, `banco_id`, `banco`, `saldo` |
 | `audit` | `id`, `action`, `entity`, `user`, `timestamp`, `changes` |
-| `config_agentes` | `id`, `nombre` |
+| `config_agentes` | `id`, `nombre`, `username`, `password_hash`, `role`, `activo` |
 | `config_categorias` | `id`, `categoria`, `subcategoria` |
-| `config_bancos` | `id`, `nombre`, `propietario` |
+| `config_bancos` | `id`, `nombre`, `propietario`, `propietario_id` |
+| `config_settings` | `key`, `value`, `fecha_efectiva`, `actualizado_por`, `actualizado_en` |
 | `config_cajas` | `id`, `nombre` |
 | `config_tipos_pago` | `id`, `nombre` |
 | `config_usuarios` | `id`, `nombre` |
@@ -103,19 +107,34 @@ Clona el repositorio en tu maquina local y entra en la carpeta raiz del proyecto
 3. Rellena estas variables:
 
 ```env
-GOOGLE_APPLICATION_CREDENTIALS=keys/google-vision.json
+GOOGLE_CREDENTIALS_BASE64=<service-account-json-en-base64>
 GOOGLE_SHEET_ID=tu_spreadsheet_id
 GOOGLE_SHEET_OWNER_EMAIL=tu_correo_opcional
+JWT_SECRET=<>=32 chars>
+AUTH_BOOTSTRAP_ADMIN_PASSWORD=<>
+AUTH_BOOTSTRAP_AGENT_PASSWORD=<>
 PORT=3001
 CORS_ORIGIN=http://localhost:3000
 NODE_ENV=development
+# Opcionales para comprobantes en R2
+R2_ACCOUNT_ID=<>
+R2_ACCESS_KEY_ID=<>
+R2_SECRET_ACCESS_KEY=<>
+R2_BUCKET=<>
+R2_PUBLIC_URL=<>
 ```
 
 Notas:
 
-- `GOOGLE_APPLICATION_CREDENTIALS` debe apuntar al JSON dentro de `backend/keys/`.
+- `GOOGLE_CREDENTIALS_BASE64` es el JSON del Service Account codificado en base64. Generar con:
+  ```bash
+  base64 -w0 backend/keys/google-vision.json   # Linux
+  # o:  certutil -encode backend/keys/google-vision.json tmp.b64 && type tmp.b64   # Windows
+  ```
+  El backend ya **no** lee `GOOGLE_APPLICATION_CREDENTIALS`.
 - `GOOGLE_SHEET_ID` debe ser el id exacto del spreadsheet.
 - `GOOGLE_SHEET_OWNER_EMAIL` es opcional, pero ayuda si quieres que el script comparta el spreadsheet automaticamente cuando lo crea.
+- Si no configuras R2, los pagos siguen registrándose pero el comprobante queda solo como URL temporal del navegador.
 
 ### 4.3 Instalar dependencias
 
@@ -155,7 +174,16 @@ cd backend
 npm run sheets:verify
 ```
 
-El resultado esperado es que las 11 hojas existan y que la fila 1 tenga los headers correctos.
+El resultado esperado es que las 12 hojas existan y que la fila 1 tenga los headers correctos.
+
+### 5.1 Configuracion global de mes
+
+La clave `caja_inicio_mes` vive en `config_settings` y define la caja total al inicio de cada mes para el calculo de Balance acumulado.
+
+- Valor por defecto: `0`
+- Fecha efectiva inicial: primer dia del mes actual
+- Se debe actualizar solo cuando cambie el arranque contable del mes o exista una correccion administrativa
+- Cada cambio queda auditado en la hoja `audit`
 
 ## 6. Arranque local
 
@@ -197,27 +225,26 @@ Haz estas comprobaciones en este orden:
 4. Crea un pago de prueba desde la pantalla de pagos.
 5. Verifica que el registro aparezca en la hoja `pagos` del spreadsheet.
 6. Comprueba que tambien se registre la auditoria en la hoja `audit`.
+7. Ejecuta el verificador de Balance E2E con `node backend/scripts/verifyBalanceE2E.js`.
+8. Completa el checklist manual de [UAT Balance](./uat-balance.md).
 
 Si el backend arranca pero no encuentra credenciales o `GOOGLE_SHEET_ID`, caera en modo in-memory. Eso sirve para desarrollo, pero no valida persistencia real.
 
-## 8. Despliegue futuro
+## 8. Despliegue
 
-Este proyecto todavia no trae despliegue configurado, pero estas son las opciones recomendadas:
-
-- Frontend: Vercel
-- Backend: Railway, Render, Google Cloud Run o un VPS
-- Persistencia: Google Sheets compartido con la Service Account
+El despliegue activo está en Vercel (frontend) y Railway (backend). Ver [DEPLOY.md](./DEPLOY.md) para el procedimiento completo y las variables de entorno requeridas en cada plataforma.
 
 Checklist antes de producir:
 
 - Variables de entorno separadas por entorno
 - `CORS_ORIGIN` apuntando al dominio real del frontend
-- Service Account con acceso al spreadsheet real
+- Service Account codificada en `GOOGLE_CREDENTIALS_BASE64` con acceso al spreadsheet real
 - Vision API habilitada si vas a usar OCR
+- Bucket R2 con CORS al dominio del frontend si se persisten comprobantes
 
 ## 9. Troubleshooting rapido
 
-- Si el backend no conecta, revisa que `GOOGLE_APPLICATION_CREDENTIALS` apunte al JSON correcto.
+- Si el backend no conecta, revisa que `GOOGLE_CREDENTIALS_BASE64` esté seteada y sea base64 válido del JSON de la Service Account.
 - Si Sheets devuelve `403`, comparte el spreadsheet con el `client_email` de la Service Account.
 - Si `npm run sheets:verify` falla, revisa que los nombres de hojas y los headers coincidan exactamente.
 - Si el frontend no llega al backend, revisa `NEXT_PUBLIC_API_URL` y `CORS_ORIGIN`.
@@ -228,6 +255,6 @@ Al terminar estos pasos deberias tener:
 
 - Backend funcionando en `3001`
 - Frontend funcionando en `3000`
-- Spreadsheet con 11 hojas y headers correctos
+- Spreadsheet con 12 hojas y headers correctos
 - Un pago de prueba visible en Google Sheets
 - Auditoria escrita automaticamente

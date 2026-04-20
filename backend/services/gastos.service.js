@@ -4,11 +4,10 @@ const { nowLima } = require('../config/timezone');
 const { validateReferences, getConfigBancoById } = require('./config.service');
 const { BadRequestError, ForbiddenError, NotFoundError } = require('../utils/appError');
 const { paginateItems } = require('../utils/pagination');
+const { createPrefixedId } = require('../utils/id');
 
 const SHEET_NAME = 'gastos';
 const HEADERS = ['id', 'estado', 'fecha_gasto', 'fecha_registro', 'concepto', 'categoria', 'subcategoria', 'banco_id', 'banco', 'monto'];
-
-let gastoCounter = 1;
 
 function normalizeText(value) {
   return String(value ?? '').trim().toLowerCase();
@@ -180,7 +179,7 @@ async function create(data, caller) {
   const bancoDetails = await assertBancoOwnershipForCaller(data.banco_id, caller);
 
   const gasto = {
-    id: `GAS-${Date.now()}-${gastoCounter++}`,
+    id: createPrefixedId('GAS'),
     estado: 'activo',
     fecha_gasto: data.fecha_gasto,
     fecha_registro: nowLima(),

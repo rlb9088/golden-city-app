@@ -6,15 +6,21 @@ import {
   addTableRow,
   changeAgentPassword,
   getConfig,
+  getSetting,
   getTableData,
   importTableBatch,
   removeTableRow,
+  updateSetting,
   updateTableRow,
   type ConfigAgent,
+  type ConfigSetting,
 } from '@/lib/api';
 import AlertBanner from '@/components/AlertBanner';
 import TableSkeleton from '@/components/TableSkeleton';
+import { formatCurrency, formatDate, getTodayLima } from '@/lib/format';
 import './configuracion.css';
+
+const CAJA_INICIO_MES_KEY = 'caja_inicio_mes';
 
 const TABS = [
   { id: 'agentes', label: '👤 Agentes' },
@@ -85,6 +91,11 @@ export default function ConfiguracionPage() {
   const [editForm, setEditForm] = useState<Record<string, string>>({});
   const [passwordTarget, setPasswordTarget] = useState<ConfigAgent | null>(null);
   const [passwordValue, setPasswordValue] = useState('');
+  const [cajaInicioMes, setCajaInicioMes] = useState<ConfigSetting | null>(null);
+  const [cajaInicioMesValue, setCajaInicioMesValue] = useState('');
+  const [cajaInicioMesFecha, setCajaInicioMesFecha] = useState('');
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [settingsSubmitting, setSettingsSubmitting] = useState(false);
 
   const [newAgenteNombre, setNewAgenteNombre] = useState('');
   const [newAgenteUsername, setNewAgenteUsername] = useState('');
@@ -100,6 +111,10 @@ export default function ConfiguracionPage() {
   const [csvText, setCsvText] = useState('');
 
   const editFields = activeTab === 'agentes' ? [] : (EDIT_FIELDS[activeTab as Exclude<TabKey, 'agentes'>] ?? []);
+  const cajaInicioMesPreview = Number(cajaInicioMesValue);
+  const cajaInicioMesPreviewValid = cajaInicioMesValue.trim() !== '' && Number.isFinite(cajaInicioMesPreview) && cajaInicioMesPreview >= 0;
+  const cajaInicioMesFechaValid = Boolean(cajaInicioMesFecha && !Number.isNaN(new Date(`${cajaInicioMesFecha}T12:00:00`).getTime()));
+  const cajaInicioMesCanSave = cajaInicioMesPreviewValid && cajaInicioMesFechaValid && !settingsSubmitting && !settingsLoading;
 
   const refreshAgentes = useCallback(async () => {
     const config = await getConfig();
@@ -123,6 +138,23 @@ export default function ConfiguracionPage() {
       setLoading(false);
     }
   }, [refreshAgentes]);
+
+  const loadCajaInicioMes = useCallback(async () => {
+    setSettingsLoading(true);
+    try {
+      const setting = await getSetting(CAJA_INICIO_MES_KEY);
+      setCajaInicioMes(setting.data);
+      setCajaInicioMesValue(String(setting.data.value ?? '0'));
+      setCajaInicioMesFecha(setting.data.fecha_efectiva || getTodayLima());
+    } catch (err) {
+      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar caja inicio mes' });
+      setCajaInicioMes(null);
+      setCajaInicioMesValue('0');
+      setCajaInicioMesFecha(getTodayLima());
+    } finally {
+      setSettingsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -148,6 +180,25 @@ export default function ConfiguracionPage() {
       alive = false;
     };
   }, [isAdmin, refreshAgentes]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+
+    let alive = true;
+    void (async () => {
+      try {
+        await loadCajaInicioMes();
+      } catch (err) {
+        if (alive) {
+          setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar ajustes generales' });
+        }
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [isAdmin, loadCajaInicioMes]);
 
   const isDuplicateAgenteUsername = useCallback((username: string, ignoreId?: string) => {
     const needle = normalizeLookup(username);
@@ -394,6 +445,36 @@ export default function ConfiguracionPage() {
     }
   };
 
+  const handleCajaInicioMesSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const value = Number(cajaInicioMesValue);
+    const fechaEfectiva = cajaInicioMesFecha.trim();
+
+    if (!Number.isFinite(value) || value < 0) {
+      setAlert({ type: 'error', message: 'El valor de caja inicio mes debe ser un numero mayor o igual a 0.' });
+      return;
+    }
+
+    if (!fechaEfectiva || Number.isNaN(new Date(`${fechaEfectiva}T12:00:00`).getTime())) {
+      setAlert({ type: 'error', message: 'Selecciona una fecha efectiva valida.' });
+      return;
+    }
+
+    try {
+      setSettingsSubmitting(true);
+      const response = await updateSetting(CAJA_INICIO_MES_KEY, value, fechaEfectiva);
+      setCajaInicioMes(response.data);
+      setCajaInicioMesValue(String(response.data.value ?? '0'));
+      setCajaInicioMesFecha(response.data.fecha_efectiva || fechaEfectiva);
+      setAlert({ type: 'success', message: 'Caja inicio mes actualizada correctamente' });
+    } catch (err) {
+      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al actualizar caja inicio mes' });
+    } finally {
+      setSettingsSubmitting(false);
+    }
+  };
+
   const currentTabLabel = TABS.find((tab) => tab.id === activeTab)?.label;
 
   if (!isAdmin) {
@@ -415,6 +496,67 @@ export default function ConfiguracionPage() {
           <p className="page-subtitle">Administra las listas desplegables y las identidades del sistema</p>
         </div>
       </div>
+
+      <section className="config-section card config-section--settings">
+        <div className="config-section-header">
+          <div>
+            <h2 className="config-section-title">Ajustes generales</h2>
+            <p className="page-subtitle" style={{ margin: '0.25rem 0 0' }}>
+              Configura el valor base que alimenta el cálculo del balance acumulado.
+            </p>
+          </div>
+          {cajaInicioMes && (
+            <span className="badge badge-blue">
+              Vigente desde {formatDate(cajaInicioMes.fecha_efectiva)}
+            </span>
+          )}
+        </div>
+
+        <form className="settings-form" onSubmit={handleCajaInicioMesSubmit}>
+          <label className="field-group">
+            <span className="label">Caja total al inicio de mes</span>
+            <input
+              className="input"
+              type="number"
+              min="0"
+              step="0.01"
+              inputMode="decimal"
+              value={cajaInicioMesValue}
+              onChange={(event) => setCajaInicioMesValue(event.target.value)}
+              placeholder="0.00"
+              required
+              disabled={settingsLoading}
+            />
+          </label>
+
+          <label className="field-group">
+            <span className="label">Fecha efectiva</span>
+            <input
+              className="input"
+              type="date"
+              value={cajaInicioMesFecha}
+              onChange={(event) => setCajaInicioMesFecha(event.target.value)}
+              required
+              disabled={settingsLoading}
+            />
+          </label>
+
+          <div className="settings-summary">
+            <span className="settings-summary-label">Valor actual</span>
+            <strong>{formatCurrency(cajaInicioMesPreviewValid ? cajaInicioMesPreview : 0)}</strong>
+            <span className="settings-summary-label">Fecha efectiva</span>
+            <strong>{cajaInicioMesFechaValid ? formatDate(cajaInicioMesFecha) : 'Sin fecha válida'}</strong>
+          </div>
+
+          <div className="settings-actions">
+            <button className="btn btn-primary" type="submit" disabled={!cajaInicioMesCanSave}>
+              {settingsSubmitting ? 'Guardando...' : 'Guardar'}
+            </button>
+          </div>
+        </form>
+
+        {settingsLoading && <p className="text-muted settings-loading">Cargando ajuste actual...</p>}
+      </section>
 
       <div className="tabs-header">
         {TABS.map((tab) => (

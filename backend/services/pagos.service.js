@@ -6,14 +6,13 @@ const { nowLima } = require('../config/timezone');
 const { validateReferences, getConfigBancoById } = require('./config.service');
 const { BadRequestError, ForbiddenError, NotFoundError } = require('../utils/appError');
 const { paginateItems } = require('../utils/pagination');
+const { createPrefixedId } = require('../utils/id');
 
 const SHEET_NAME = 'pagos';
 const HEADERS = [
   'id', 'estado', 'usuario', 'caja', 'banco_id', 'banco', 'monto', 'tipo',
   'comprobante_url', 'comprobante_file_id', 'fecha_comprobante', 'fecha_registro', 'agente'
 ];
-
-let pagoCounter = 1;
 
 function normalizeText(value) {
   return String(value ?? '').trim().toLowerCase();
@@ -328,7 +327,7 @@ async function create(data, caller) {
     allowMissingOwner: typeof caller === 'string',
   });
 
-  const pagoId = `PAG-${Date.now()}-${pagoCounter++}`;
+  const pagoId = createPrefixedId('PAG');
   const basePago = {
     id: pagoId,
     estado: 'activo',

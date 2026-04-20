@@ -2,8 +2,10 @@ const bcrypt = require('bcrypt');
 const repo = require('../repositories/sheetsRepository');
 const audit = require('./audit.service');
 const authService = require('./auth.service');
+const { nowLima, todayLima } = require('../config/timezone');
 const { BadRequestError, NotFoundError } = require('../utils/appError');
 const logger = require('../lib/logger');
+const { createPrefixedId } = require('../utils/id');
 
 /**
  * Servicio de configuracion - CRUD sobre tablas de config.
@@ -18,6 +20,11 @@ const TABLES = {
   usuarios: { sheet: 'config_usuarios', headers: ['id', 'nombre'] },
   tipos_pago: { sheet: 'config_tipos_pago', headers: ['id', 'nombre'] },
 };
+
+const SETTINGS_SHEET = 'config_settings';
+const SETTINGS_HEADERS = ['key', 'value', 'fecha_efectiva', 'actualizado_por', 'actualizado_en'];
+const SETTINGS_SEED_KEY = 'caja_inicio_mes';
+const BANK_CLASSIFICATION_TTL_MS = 30_000;
 
 // Default seed data (used when tables are empty)
 const SEED_DATA = {
@@ -59,14 +66,73 @@ const SEED_DATA = {
   ],
 };
 
-let counters = { agentes: 100, categorias: 100, bancos: 100, cajas: 100, usuarios: 100, tipos_pago: 100 };
-
 function normalizeLookup(value) {
   return String(value ?? '').trim().toLowerCase();
 }
 
 function normalizeText(value) {
   return String(value ?? '').trim();
+}
+
+function normalizeBankId(value) {
+  return normalizeText(value);
+}
+
+function normalizeSettingKey(value) {
+  return normalizeLookup(value);
+}
+
+function normalizeSettingValue(value) {
+  return normalizeText(value);
+}
+
+function parseSettingValue(value) {
+  const normalized = normalizeSettingValue(value);
+  if (!normalized) {
+    return '';
+  }
+
+  if (/^-?\d+(?:\.\d+)?$/.test(normalized)) {
+    return Number(normalized);
+  }
+
+  return normalized;
+}
+
+function getFirstDayOfCurrentMonthLima() {
+  const today = todayLima();
+  return `${today.slice(0, 7)}-01`;
+}
+
+function buildSettingsSeedRecord() {
+  return {
+    key: SETTINGS_SEED_KEY,
+    value: '0',
+    fecha_efectiva: getFirstDayOfCurrentMonthLima(),
+    actualizado_por: 'system',
+    actualizado_en: nowLima(),
+  };
+}
+
+function normalizeSettingRecord(record) {
+  const { _rowIndex, ...rest } = record || {};
+  return {
+    ...rest,
+    key: normalizeSettingKey(rest.key),
+    value: normalizeSettingValue(rest.value),
+    fecha_efectiva: normalizeText(rest.fecha_efectiva),
+    actualizado_por: normalizeText(rest.actualizado_por),
+    actualizado_en: normalizeText(rest.actualizado_en),
+  };
+}
+
+function formatSettingForRead(record) {
+  const normalized = normalizeSettingRecord(record);
+  return {
+    key: normalized.key,
+    value: parseSettingValue(normalized.value),
+    fecha_efectiva: normalized.fecha_efectiva,
+  };
 }
 
 function getUniqueLabels(rows, field) {
@@ -128,6 +194,126 @@ function sanitizeAgentRow(record) {
 function stripInternalFields(record) {
   const { _rowIndex, ...rest } = record;
   return rest;
+}
+
+let bankClassificationCache = null;
+
+function clearBankClassificationCache() {
+  bankClassificationCache = null;
+}
+
+function getBankRecordId(record) {
+  return normalizeBankId(record?.id || record?.banco_id);
+}
+
+function getBankOwnerId(record) {
+  return normalizeBankId(record?.propietario_id);
+}
+
+function getBankClassificationFromRecord(record, adminIds, agentIds) {
+  const bankId = getBankRecordId(record);
+  const ownerId = normalizeLookup(record?.propietario_id);
+
+  if (!bankId || !ownerId) {
+    return { bankId, classification: 'unknown' };
+  }
+
+  if (adminIds.has(ownerId)) {
+    return { bankId, classification: 'admin' };
+  }
+
+  if (agentIds.has(ownerId)) {
+    return { bankId, classification: 'agente' };
+  }
+
+  return { bankId, classification: 'unknown' };
+}
+
+async function buildBankClassificationSnapshot() {
+  const [agentes, bancos] = await Promise.all([
+    getTable('agentes'),
+    getTable('bancos'),
+  ]);
+
+  const adminIds = new Set();
+  const agentIds = new Set();
+
+  agentes.forEach((agente) => {
+    const agentId = normalizeLookup(agente?.id);
+    const role = normalizeLookup(agente?.role);
+
+    if (!agentId) {
+      return;
+    }
+
+    if (role === 'admin') {
+      adminIds.add(agentId);
+      return;
+    }
+
+    if (role === 'agent') {
+      agentIds.add(agentId);
+    }
+  });
+
+  const adminBankIds = new Set();
+  const agentBankIds = new Set();
+  const bankClassifications = new Map();
+
+  bancos.forEach((banco) => {
+    const { bankId, classification } = getBankClassificationFromRecord(banco, adminIds, agentIds);
+
+    if (!bankId) {
+      return;
+    }
+
+    bankClassifications.set(normalizeLookup(bankId), classification);
+
+    if (classification === 'admin') {
+      adminBankIds.add(bankId);
+      return;
+    }
+
+    if (classification === 'agente') {
+      agentBankIds.add(bankId);
+    }
+  });
+
+  return {
+    adminBankIds,
+    agentBankIds,
+    bankClassifications,
+    expiresAt: Date.now() + BANK_CLASSIFICATION_TTL_MS,
+  };
+}
+
+async function getBankClassificationSnapshot() {
+  if (bankClassificationCache && bankClassificationCache.expiresAt > Date.now()) {
+    return bankClassificationCache;
+  }
+
+  bankClassificationCache = await buildBankClassificationSnapshot();
+  return bankClassificationCache;
+}
+
+async function getAdminBankIds() {
+  const snapshot = await getBankClassificationSnapshot();
+  return new Set(snapshot.adminBankIds);
+}
+
+async function getAgentBankIds() {
+  const snapshot = await getBankClassificationSnapshot();
+  return new Set(snapshot.agentBankIds);
+}
+
+async function classifyBanco(bancoId) {
+  const id = normalizeBankId(bancoId);
+  if (!id) {
+    return 'unknown';
+  }
+
+  const snapshot = await getBankClassificationSnapshot();
+  return snapshot.bankClassifications.get(normalizeLookup(id)) || 'unknown';
 }
 
 function getWritableFields(tableName) {
@@ -358,6 +544,89 @@ async function getConfigBancoById(bancoId) {
   return bancos.find((row) => normalizeLookup(row.id) === normalizeLookup(id)) || null;
 }
 
+async function getSetting(key) {
+  const normalizedKey = normalizeSettingKey(key);
+  if (!normalizedKey) {
+    throw new BadRequestError('La clave de configuracion es obligatoria.', {
+      context: { tableName: SETTINGS_SHEET },
+    });
+  }
+
+  const rows = await repo.getAll(SETTINGS_SHEET);
+  const existingRecord = rows.find((row) => normalizeSettingKey(row.key) === normalizedKey);
+
+  if (existingRecord) {
+    return formatSettingForRead(existingRecord);
+  }
+
+  if (normalizedKey === SETTINGS_SEED_KEY) {
+    return formatSettingForRead(buildSettingsSeedRecord());
+  }
+
+  throw new NotFoundError(`No se encontro la clave ${key} en la tabla config_settings.`, {
+    context: {
+      tableName: SETTINGS_SHEET,
+      key: normalizedKey,
+    },
+  });
+}
+
+async function upsertSetting(key, item, user = 'system') {
+  const normalizedKey = normalizeSettingKey(key);
+  if (!normalizedKey) {
+    throw new BadRequestError('La clave de configuracion es obligatoria.', {
+      context: { tableName: SETTINGS_SHEET },
+    });
+  }
+
+  const source = item && typeof item === 'object' ? item : {};
+  const value = normalizeSettingValue(source.value);
+  const fechaEfectiva = normalizeText(source.fecha_efectiva);
+
+  if (!value) {
+    throw new BadRequestError('El valor de configuracion es obligatorio.', {
+      context: {
+        tableName: SETTINGS_SHEET,
+        key: normalizedKey,
+      },
+    });
+  }
+
+  if (!fechaEfectiva) {
+    throw new BadRequestError('La fecha efectiva es obligatoria.', {
+      context: {
+        tableName: SETTINGS_SHEET,
+        key: normalizedKey,
+      },
+    });
+  }
+
+  const rows = await repo.getAll(SETTINGS_SHEET);
+  const existingRecord = rows.find((row) => normalizeSettingKey(row.key) === normalizedKey);
+  const nextRecord = {
+    key: normalizedKey,
+    value,
+    fecha_efectiva: fechaEfectiva,
+    actualizado_por: normalizeText(user) || 'system',
+    actualizado_en: nowLima(),
+  };
+
+  if (existingRecord) {
+    const storedNextRecord = { ...existingRecord, ...nextRecord };
+    await repo.update(SETTINGS_SHEET, existingRecord._rowIndex, storedNextRecord, SETTINGS_HEADERS);
+    await audit.log('update', 'config_settings', user, {
+      before: formatSettingForRead(existingRecord),
+      after: formatSettingForRead(storedNextRecord),
+      changes: formatSettingForRead(nextRecord),
+    });
+    return formatSettingForRead(storedNextRecord);
+  }
+
+  await repo.append(SETTINGS_SHEET, nextRecord, SETTINGS_HEADERS);
+  await audit.log('create', 'config_settings', user, formatSettingForRead(nextRecord));
+  return formatSettingForRead(nextRecord);
+}
+
 async function existsInTable(tableName, value, field = 'nombre', matcher = null) {
   if (value === undefined || value === null || String(value).trim() === '') {
     return true;
@@ -482,7 +751,7 @@ function getImportLabel(tableName, record) {
 }
 
 function createConfigRecord(tableName, item) {
-  const id = `${tableName.toUpperCase().slice(0, 3)}-${Date.now()}-${counters[tableName]++}`;
+  const id = createPrefixedId(tableName.toUpperCase().slice(0, 3));
   return { id, ...item };
 }
 
@@ -616,6 +885,7 @@ async function updateAgentPassword(id, password, user = 'system') {
     const storedNextRecord = { ...existingRecord, password_hash: nextRecord.password_hash };
     await repo.update(sheet, existingRecord._rowIndex, storedNextRecord, headers);
     authService.clearAuthUserCache();
+    clearBankClassificationCache();
     await audit.log('update_password', 'config_agentes', user, {
       id,
       username: normalizeLookup(sourceRecord.username),
@@ -626,6 +896,7 @@ async function updateAgentPassword(id, password, user = 'system') {
   const storedNextRecord = { ...sourceRecord, password_hash: nextRecord.password_hash };
   updateSeedRecord('agentes', id, storedNextRecord);
   authService.clearAuthUserCache();
+  clearBankClassificationCache();
   await audit.log('update_password', 'config_agentes', user, {
     id,
     username: normalizeLookup(sourceRecord.username),
@@ -661,6 +932,7 @@ async function updateInTable(tableName, id, patch = {}, user = 'system') {
       const storedNextRecord = { ...existingRecord, ...nextRecord };
       await repo.update(sheet, existingRecord._rowIndex, storedNextRecord, headers);
       authService.clearAuthUserCache();
+      clearBankClassificationCache();
       await audit.log('update', `config_${tableName}`, user, {
         before: stripInternalFields(normalizeAgentRow(existingRecord)),
         after: sanitizeAgentRow(storedNextRecord),
@@ -672,6 +944,7 @@ async function updateInTable(tableName, id, patch = {}, user = 'system') {
     const storedNextRecord = { ...sourceRecord, ...nextRecord };
     updateSeedRecord(tableName, id, storedNextRecord);
     authService.clearAuthUserCache();
+    clearBankClassificationCache();
     await audit.log('update', `config_${tableName}`, user, {
       before: sanitizeAgentRow(sourceRecord),
       after: sanitizeAgentRow(storedNextRecord),
@@ -689,6 +962,9 @@ async function updateInTable(tableName, id, patch = {}, user = 'system') {
   if (existingRecord) {
     const nextRecord = buildUpdatedRecord(existingRecord, nextPatch, tableName);
     await repo.update(sheet, existingRecord._rowIndex, nextRecord, headers);
+    if (tableName === 'bancos') {
+      clearBankClassificationCache();
+    }
     await audit.log('update', `config_${tableName}`, user, {
       before: stripInternalFields(existingRecord),
       after: stripInternalFields(nextRecord),
@@ -703,6 +979,9 @@ async function updateInTable(tableName, id, patch = {}, user = 'system') {
   if (seedRecord) {
     const nextRecord = buildUpdatedRecord(seedRecord, nextPatch, tableName);
     updateSeedRecord(tableName, id, nextRecord);
+    if (tableName === 'bancos') {
+      clearBankClassificationCache();
+    }
     await audit.log('update', `config_${tableName}`, user, {
       before: stripInternalFields(seedRecord),
       after: stripInternalFields(nextRecord),
@@ -746,6 +1025,7 @@ async function removeFromTable(tableName, id, user = 'system') {
       await repo.deleteRow(sheet, realRecord._rowIndex);
       removeFromSeedData(tableName, id);
       authService.clearAuthUserCache();
+      clearBankClassificationCache();
       const { _rowIndex, ...deletedRecord } = realRecord;
       await audit.log('delete', `config_${tableName}`, user, sanitizeAgentRow(deletedRecord));
       return { status: 'removed', id };
@@ -753,6 +1033,7 @@ async function removeFromTable(tableName, id, user = 'system') {
 
     const seedRemoved = removeFromSeedData(tableName, id);
     if (seedRemoved) {
+      clearBankClassificationCache();
       await audit.log('delete', `config_${tableName}`, user, sanitizeAgentRow(seedRemoved));
       return { status: 'removed', id };
     }
@@ -766,6 +1047,7 @@ async function removeFromTable(tableName, id, user = 'system') {
 
     removeFromSeedData(tableName, id);
     authService.clearAuthUserCache();
+    clearBankClassificationCache();
 
     const { _rowIndex, ...deletedRecord } = realRecord;
     await audit.log('delete', `config_${tableName}`, user, deletedRecord);
@@ -774,6 +1056,7 @@ async function removeFromTable(tableName, id, user = 'system') {
 
   const seedRecord = removeFromSeedData(tableName, id);
   if (seedRecord) {
+    clearBankClassificationCache();
     await audit.log('delete', `config_${tableName}`, user, seedRecord);
     return { status: 'removed', id };
   }
@@ -804,6 +1087,10 @@ async function importBatch(tableName, items, user = 'system') {
   await repo.appendBatch(sheet, records.map((record) => headers.map((header) => record[header] ?? '')));
   if (isAgentTable(tableName)) {
     authService.clearAuthUserCache();
+    clearBankClassificationCache();
+  }
+  if (tableName === 'bancos') {
+    clearBankClassificationCache();
   }
   await audit.log('import', `config_${tableName}`, user, {
     count: records.length,
@@ -853,9 +1140,14 @@ async function getFullConfig() {
 module.exports = {
   getTable,
   getConfigBancoById,
+  getAdminBankIds,
+  getAgentBankIds,
+  classifyBanco,
+  getSetting,
   addToTable,
   updateInTable,
   updateAgentPassword,
+  upsertSetting,
   removeFromTable,
   importBatch,
   getFullConfig,
