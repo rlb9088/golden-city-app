@@ -11,6 +11,10 @@ function getRouteStack(router, method, path) {
   return layer.route.stack.map((entry) => entry.handle.name || entry.name);
 }
 
+function getRouteIndex(router, method, path) {
+  return router.stack.findIndex((item) => item.route && item.route.path === path && item.route.methods[method]);
+}
+
 test('los GET de movimientos y balance requieren verifyToken + requireAuth', () => {
   const pagosRouter = require('../routes/pagos.routes');
   const ingresosRouter = require('../routes/ingresos.routes');
@@ -24,7 +28,9 @@ test('los GET de movimientos y balance requieren verifyToken + requireAuth', () 
   assert.deepStrictEqual(getRouteStack(bancosRouter, 'get', '/scoped'), ['verifyToken', 'requireAuth', 'getScoped']);
   assert.deepStrictEqual(getRouteStack(bancosRouter, 'get', '/'), ['verifyToken', 'requireAuth', 'getPagedAndFiltered']);
   assert.deepStrictEqual(getRouteStack(balanceRouter, 'get', '/'), ['verifyToken', 'requireAuth', 'validateQueryMiddleware', 'getGlobal']);
+  assert.deepStrictEqual(getRouteStack(balanceRouter, 'get', '/mi-caja'), ['verifyToken', 'requireAuth', 'validateQueryMiddleware', 'getMiCaja']);
   assert.deepStrictEqual(getRouteStack(balanceRouter, 'get', '/:agente'), ['verifyToken', 'requireAuth', 'getByAgent']);
+  assert.ok(getRouteIndex(balanceRouter, 'get', '/mi-caja') < getRouteIndex(balanceRouter, 'get', '/:agente'));
 });
 
 test('config mantiene el listado general publico y protege las tablas', () => {

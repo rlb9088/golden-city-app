@@ -143,6 +143,8 @@ BalanceAcumulado(D) = (BancosAdmin(D) + CajasAgentes(D)) - TotalGastos(D) - caja
 
 ---
 
+La ruta `/balance` muestra dos vistas segun el rol: admin ve el dashboard global y agente ve "Mi Caja" personal.
+
 ### 3.6 OCR de Comprobantes
 **Propósito**: Extraer automáticamente monto y fecha de imágenes de vouchers/comprobantes bancarios.
 

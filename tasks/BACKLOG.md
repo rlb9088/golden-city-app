@@ -1,6 +1,6 @@
 # Backlog - Golden City Backoffice MVP
 
-> **Ultima actualizacion**: 2026-04-20
+> **Ultima actualizacion**: 2026-04-21
 
 ---
 
@@ -8,7 +8,7 @@
 
 | Total | Completados | En progreso/Parcial | Pendientes |
 |-------|-------------|---------------------|------------|
-| 69 | 57 | 0 | 12 |
+| 76 | 57 | 0 | 19 |
 
 ---
 
@@ -189,6 +189,22 @@
 | 069 | [E2E + checklist UAT](./TICKET-069-balance-e2e-uat.md) | ✅ | ~2h | P2 |
 
 > **Nota Sprint 13**: Orden sugerido 060 → 061 → 062 → 063 → 064 → 065 → 066 → 067 → 068 → 069. Antes de ejecutar 061 y 062 validar supuestos pendientes (criterio de "admin" en `config_bancos`, campos de fecha usados para "durante el día").
+
+---
+
+## Sprint 14 - Balance Mi Caja (agente) (🔴 Pendiente)
+
+| # | Ticket | Estado | Esfuerzo | Prioridad |
+|---|--------|--------|----------|-----------|
+| 070 | [Backend: `getAgentCajaAt` en `balance.service`](./TICKET-070-balance-agent-caja-service.md) | 🔴 | ~2h | P1 |
+| 071 | [Backend: ruta `GET /api/balance/mi-caja`](./TICKET-071-balance-mi-caja-route.md) | 🔴 | ~1h | P1 |
+| 072 | [Backend: tests unitarios de `getAgentCajaAt`](./TICKET-072-balance-agent-caja-tests.md) | 🔴 | ~2h | P1 |
+| 073 | [Frontend: tipos y cliente `getMiCaja` en `api.ts`](./TICKET-073-frontend-mi-caja-api-types.md) | 🔴 | ~1h | P1 |
+| 074 | [Frontend: componente `MiCajaView` + integración en `/balance`](./TICKET-074-frontend-mi-caja-view.md) | 🔴 | ~3h | P1 |
+| 075 | [Frontend: mostrar "Balance" en sidebar para agentes](./TICKET-075-sidebar-balance-agentes.md) | 🔴 | ~30min | P2 |
+| 076 | [Docs + E2E + UAT "Mi Caja"](./TICKET-076-balance-mi-caja-e2e-docs.md) | 🔴 | ~2h | P2 |
+
+> **Nota Sprint 14**: Orden sugerido 070 → 071 → 072 → 073 → 074 → 075 → 076. Backend (070-072) puede ejecutarse en paralelo con el frontend inicial (073). El 075 depende de 074 para poder probar la navegación. Cerrar 076 solo cuando todos los UAT pasen.
 
 ---
 

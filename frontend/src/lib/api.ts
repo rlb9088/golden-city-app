@@ -740,6 +740,20 @@ export interface BalanceSnapshot {
   cajaInicioMes: number;
 }
 
+export interface MiCajaMovimiento {
+  montoInicial: number;
+  pagosDia: number;
+  saldoTotal: number;
+}
+
+export interface MiCajaSnapshot {
+  fecha: string | null;
+  agente: string;
+  total: number;
+  movimiento: MiCajaMovimiento;
+  bancos: BalanceBankDetail[];
+}
+
 /** @deprecated Use BalanceSnapshot instead. */
 export type GlobalBalance = BalanceSnapshot;
 
@@ -756,6 +770,17 @@ export async function getBalance(fecha?: string): Promise<{ data: BalanceSnapsho
 
 export async function getAgentBalance(agente: string) {
   return request<{ status: string; data: AgentBalance }>(`/api/balance/${encodeURIComponent(agente)}`);
+}
+
+export async function getMiCaja(fecha?: string): Promise<{ data: MiCajaSnapshot }> {
+  const params = new URLSearchParams();
+  if (fecha && String(fecha).trim()) {
+    params.set('fecha', String(fecha).trim());
+  }
+
+  const query = params.toString();
+  const suffix = query ? `?${query}` : '';
+  return request<{ data: MiCajaSnapshot }>(`/api/balance/mi-caja${suffix}`);
 }
 
 // OCR

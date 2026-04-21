@@ -448,3 +448,6 @@ Frontend (localhost:3000)  →  Backend (localhost:3001)
 ### Deuda menor aceptada
 - `config_auth_users` permanece en `DEPRECATED_SHEETS_SCHEMA` solo para retrocompatibilidad de lectura.
 - `spa.traineddata` (~3.3 MB) commiteado en `backend/` para soportar OCR fallback offline.
+
+### Balance por rol
+- La ruta `/balance` muestra dashboard global para admin y "Mi Caja" personal para agente.

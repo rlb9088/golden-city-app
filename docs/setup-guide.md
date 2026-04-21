@@ -185,6 +185,17 @@ La clave `caja_inicio_mes` vive en `config_settings` y define la caja total al i
 - Se debe actualizar solo cuando cambie el arranque contable del mes o exista una correccion administrativa
 - Cada cambio queda auditado en la hoja `audit`
 
+### 5.2 Verificacion Mi Caja
+
+Cuando quieras validar la semantica de la vista de agente, ejecuta el verificador E2E nuevo:
+
+```bash
+cd backend
+node scripts/verifyMiCajaE2E.js
+```
+
+El script siembra dos agentes con dos bancos cada uno, compara tres cierres deterministas y confirma que un agente no vea la caja del otro.
+
 ## 6. Arranque local
 
 ### 6.1 Levantar el backend

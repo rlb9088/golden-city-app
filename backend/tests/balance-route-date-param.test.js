@@ -60,6 +60,22 @@ function loadApp() {
         pagos: 0,
         balance: 0,
       }),
+      getAgentCajaAt: async (params) => {
+        balanceCalls.push({ ...params, route: 'mi-caja' });
+        return {
+          fecha: params.fecha,
+          agente: params.agente,
+          total: 123,
+          movimiento: {
+            montoInicial: 100,
+            pagosDia: 10,
+            saldoTotal: 90,
+          },
+          bancos: [
+            { banco_id: 'BK-1', banco: 'Caja 1', saldo: 123 },
+          ],
+        };
+      },
     },
   };
 
@@ -128,6 +144,57 @@ test('GET /api/balance con fecha valida pasa el parametro al servicio', async (t
   assert.deepStrictEqual(balanceCalls, [{ fecha: '2026-04-15' }]);
 });
 
+test('GET /api/balance/mi-caja responde con la caja del usuario autenticado', async (t) => {
+  const { server, baseUrl, balanceCalls } = loadApp();
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const response = await fetch(`${baseUrl}/api/balance/mi-caja`, {
+    headers: requestHeaders('203.0.113.25'),
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepStrictEqual(body, {
+    status: 'success',
+    data: {
+      fecha: null,
+      agente: 'Tester',
+      total: 123,
+      movimiento: {
+        montoInicial: 100,
+        pagosDia: 10,
+        saldoTotal: 90,
+      },
+      bancos: [
+        { banco_id: 'BK-1', banco: 'Caja 1', saldo: 123 },
+      ],
+    },
+  });
+  assert.deepStrictEqual(balanceCalls, [
+    { agente: 'Tester', fecha: null, route: 'mi-caja' },
+  ]);
+});
+
+test('GET /api/balance/mi-caja rechaza fechas invalidas', async (t) => {
+  const { server, baseUrl, balanceCalls } = loadApp();
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const response = await fetch(`${baseUrl}/api/balance/mi-caja?fecha=2026-4-15`, {
+    headers: requestHeaders('203.0.113.26'),
+  });
+
+  assert.equal(response.status, 400);
+  const body = await response.json();
+  assert.equal(body.error, 'Parámetros de consulta inválidos.');
+  assert.deepStrictEqual(body.details, [
+    {
+      field: 'fecha',
+      message: 'La fecha debe tener formato YYYY-MM-DD',
+    },
+  ]);
+  assert.deepStrictEqual(balanceCalls, []);
+});
+
 test('GET /api/balance rechaza fechas invalidas y futuras', async (t) => {
   const { server, baseUrl, balanceCalls } = loadApp();
   t.after(() => new Promise((resolve) => server.close(resolve)));
@@ -155,4 +222,15 @@ test('GET /api/balance rechaza fechas invalidas y futuras', async (t) => {
   const futureBody = await futureResponse.json();
   assert.equal(futureBody.error, 'La fecha no puede ser futura.');
   assert.deepStrictEqual(balanceCalls, []);
+});
+
+test('GET /api/balance/mi-caja sin token responde 401', async (t) => {
+  const { server, baseUrl } = loadApp();
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const response = await fetch(`${baseUrl}/api/balance/mi-caja`);
+
+  assert.equal(response.status, 401);
+  const body = await response.json();
+  assert.equal(body.error, 'Autenticación requerida.');
 });

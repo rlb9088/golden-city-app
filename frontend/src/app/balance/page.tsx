@@ -15,6 +15,7 @@ import { formatCurrency, formatDate, getTodayLima } from '@/lib/format';
 import StatsCard from '@/components/StatsCard';
 import AlertBanner from '@/components/AlertBanner';
 import TableSkeleton from '@/components/TableSkeleton';
+import MiCajaView from './MiCajaView';
 import './balance.css';
 
 const CAJA_INICIO_MES_KEY = 'caja_inicio_mes';
@@ -247,17 +248,7 @@ export default function BalancePage() {
   }
 
   if (!isAdmin) {
-    return (
-      <div className="animate-fade-in" id="balance-page">
-        <div className="page-header balance-page-header">
-          <div>
-            <h1 className="page-title">Balance</h1>
-            <p className="page-subtitle">Acceso restringido</p>
-          </div>
-        </div>
-        <AlertBanner type="warning" message="Solo los administradores pueden ver el dashboard de balance." autoDismiss={0} />
-      </div>
-    );
+    return <MiCajaView />;
   }
 
   if (loading && !balance) {

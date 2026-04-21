@@ -26,3 +26,17 @@ node backend/scripts/verifyBalanceE2E.js
 
 - [ ] Todos los items anteriores estan marcados como OK por el usuario.
 - [ ] Cualquier diferencia encontrada quedo resuelta con rollback o hotfix antes del cierre.
+
+## UAT - Mi Caja (agente)
+
+- [ ] Agente logueado ve el link "Balance" en el sidebar.
+- [ ] Al entrar a /balance como agente: muestra "Mi Caja" (no el dashboard admin).
+- [ ] Sin fecha seleccionada -> modo ahora; KPI y tablas muestran data del dia actual.
+- [ ] Con fecha historica -> KPI y tablas muestran snapshot al cierre de ese dia.
+- [ ] Boton "Limpiar" restaura modo ahora.
+- [ ] Monto inicial + pagos del dia cuadran con el saldo total mostrado en el KPI.
+- [ ] Suma de saldos por banco = total "Mi caja".
+- [ ] Agente sin movimientos -> KPI en S/ 0.00, empty states en tablas.
+- [ ] Anulados no afectan ningun total (registrar un pago, anularlo, verificar).
+- [ ] Admin logueado en /balance sigue viendo dashboard de administrador completo.
+- [ ] Un agente no puede ver la caja de otro (probar llamada directa a /api/balance/mi-caja con token de agente A -> solo datos de A).

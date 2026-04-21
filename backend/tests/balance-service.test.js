@@ -7,6 +7,7 @@ function loadBalanceService({
   gastos = [],
   bancosSnapshots = [],
   configBancos = [],
+  agentes = [],
   adminBankIds = [],
   agentBankIds = [],
   cajaInicioMes = 0,
@@ -71,7 +72,17 @@ function loadBalanceService({
     filename: configPath,
     loaded: true,
     exports: {
-      getTable: async (tableName) => (tableName === 'bancos' ? configBancos : []),
+      getTable: async (tableName) => {
+        if (tableName === 'bancos') {
+          return configBancos;
+        }
+
+        if (tableName === 'agentes') {
+          return agentes;
+        }
+
+        return [];
+      },
       getAdminBankIds: async () => new Set(adminBankIds),
       getAgentBankIds: async () => new Set(agentBankIds),
       getSetting: async (key) => (key === 'caja_inicio_mes'
@@ -510,5 +521,72 @@ test('getBalanceAt agrupa correctamente gastos por subcategoria', async () => {
     balanceDia: -65,
     balanceAcumulado: -65,
     cajaInicioMes: 0,
+  });
+});
+
+test('getAgentCajaAt calcula el cierre del agente con fecha y filtra solo sus bancos', async () => {
+  const service = loadBalanceService({
+    ingresos: [
+      { agente: 'Agente 1', banco_id: 'BK-G1', banco: 'Caja 1', monto: 100, fecha_movimiento: '2026-04-18', estado: 'activo' },
+      { agente: 'Agente 1', banco_id: 'BK-G1', banco: 'Caja 1', monto: 40, fecha_movimiento: '2026-04-19', estado: 'anulado' },
+      { agente: 'Agente 1', banco_id: 'BK-G2', banco: 'Caja 2', monto: 60, fecha_movimiento: '2026-04-19', estado: 'activo' },
+      { agente: 'Agente 2', banco_id: 'BK-G2', banco: 'Caja 2', monto: 999, fecha_movimiento: '2026-04-19', estado: 'activo' },
+    ],
+    pagos: [
+      { agente: 'Agente 1', banco_id: 'BK-G1', banco: 'Caja 1', monto: 25, fecha_comprobante: '2026-04-18', estado: 'activo' },
+      { agente: 'Agente 1', banco_id: 'BK-G1', banco: 'Caja 1', monto: 10, fecha_comprobante: '2026-04-19', estado: 'activo' },
+      { agente: 'Agente 1', banco_id: 'BK-G2', banco: 'Caja 2', monto: 50, fecha_comprobante: '2026-04-19', estado: 'activo' },
+    ],
+    configBancos: [
+      { id: 'BK-G1', nombre: 'Caja 1', propietario_id: 'AG-1' },
+      { id: 'BK-G2', nombre: 'Caja 2', propietario_id: 'AG-2' },
+      { id: 'BK-ADMIN', nombre: 'Admin', propietario_id: 'AG-ADMIN' },
+    ],
+    agentes: [
+      { id: 'AG-1', nombre: 'Agente 1', username: 'agente1' },
+      { id: 'AG-2', nombre: 'Agente 2', username: 'agente2' },
+    ],
+  });
+
+  const result = await service.getAgentCajaAt({ agente: 'agente 1', fecha: '2026-04-19' });
+
+  assert.deepStrictEqual(result, {
+    fecha: '2026-04-19',
+    agente: 'Agente 1',
+    total: 65,
+    movimiento: {
+      montoInicial: 75,
+      pagosDia: 10,
+      saldoTotal: 65,
+    },
+    bancos: [
+      { banco_id: 'BK-G1', banco: 'Caja 1', saldo: 65 },
+    ],
+  });
+});
+
+test('getAgentCajaAt en modo ahora devuelve ceros cuando no hay movimientos', async () => {
+  const service = loadBalanceService({
+    configBancos: [
+      { id: 'BK-G1', nombre: 'Caja 1', propietario_id: 'AG-1' },
+    ],
+    agentes: [
+      { id: 'AG-1', nombre: 'Agente 1', username: 'agente1' },
+    ],
+    todayDate: '2026-04-20',
+  });
+
+  const result = await service.getAgentCajaAt({ agente: 'Agente 1' });
+
+  assert.deepStrictEqual(result, {
+    fecha: null,
+    agente: 'Agente 1',
+    total: 0,
+    movimiento: {
+      montoInicial: 0,
+      pagosDia: 0,
+      saldoTotal: 0,
+    },
+    bancos: [],
   });
 });
