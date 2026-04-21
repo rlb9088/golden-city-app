@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const repo = require('../repositories/sheetsRepository');
 const audit = require('./audit.service');
 const authService = require('./auth.service');
+const { getSheetsClient, getSheetId } = require('../config/sheetsClient');
 const { nowLima, todayLima } = require('../config/timezone');
 const { BadRequestError, NotFoundError } = require('../utils/appError');
 const logger = require('../lib/logger');
@@ -133,6 +134,60 @@ function formatSettingForRead(record) {
     value: parseSettingValue(normalized.value),
     fecha_efectiva: normalized.fecha_efectiva,
   };
+}
+
+async function ensureSettingsSheetExists() {
+  const sheets = await getSheetsClient();
+  const spreadsheetId = getSheetId();
+
+  if (!sheets || !spreadsheetId) {
+    return false;
+  }
+
+  const metadata = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets.properties(sheetId,title)',
+  });
+
+  const existingSheet = (metadata.data.sheets || []).find((sheet) => sheet.properties?.title === SETTINGS_SHEET);
+  if (!existingSheet) {
+    await sheets.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [
+          {
+            addSheet: {
+              properties: {
+                title: SETTINGS_SHEET,
+              },
+            },
+          },
+        ],
+      },
+    });
+  }
+
+  const headersResponse = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `${SETTINGS_SHEET}!1:1`,
+    valueRenderOption: 'FORMATTED_VALUE',
+  });
+
+  const actualHeaders = headersResponse.data.values?.[0] || [];
+  const shouldWriteHeaders =
+    actualHeaders.length !== SETTINGS_HEADERS.length
+    || !actualHeaders.every((header, index) => header === SETTINGS_HEADERS[index]);
+
+  if (shouldWriteHeaders) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${SETTINGS_SHEET}!A1:${String.fromCharCode(64 + SETTINGS_HEADERS.length)}1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [SETTINGS_HEADERS] },
+    });
+  }
+
+  return true;
 }
 
 function getUniqueLabels(rows, field) {
@@ -552,7 +607,21 @@ async function getSetting(key) {
     });
   }
 
-  const rows = await repo.getAll(SETTINGS_SHEET);
+  let rows = [];
+  try {
+    rows = await repo.getAll(SETTINGS_SHEET);
+  } catch (error) {
+    if (normalizedKey === SETTINGS_SEED_KEY) {
+      logger.warn('Using default config_settings seed because the sheet is not ready yet.', {
+        context: { tableName: SETTINGS_SHEET, key: normalizedKey },
+        error,
+      });
+      return formatSettingForRead(buildSettingsSeedRecord());
+    }
+
+    throw error;
+  }
+
   const existingRecord = rows.find((row) => normalizeSettingKey(row.key) === normalizedKey);
 
   if (existingRecord) {
@@ -600,6 +669,8 @@ async function upsertSetting(key, item, user = 'system') {
       },
     });
   }
+
+  await ensureSettingsSheetExists();
 
   const rows = await repo.getAll(SETTINGS_SHEET);
   const existingRecord = rows.find((row) => normalizeSettingKey(row.key) === normalizedKey);
