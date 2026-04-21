@@ -72,24 +72,22 @@ export default function LoginPage() {
         <div className="auth-visual-copy">
           <span className="auth-eyebrow">Golden City Backoffice</span>
           <h1 className="auth-hero">
-            Acceso seguro para operar
-            <span className="auth-hero-accent">sin falsificar permisos.</span>
+            Sistema de gestión de cajas
+            <span className="auth-hero-accent">Golden City</span>
           </h1>
-          <p className="auth-hero-copy">
-            Ingresa con tu usuario del sistema. El backend validara tu JWT y el frontend mantendra tu sesion renovando tokens en localStorage.
-          </p>
+          <p className="auth-hero-copy">Ten el control de tu caja en tiempo real, desde donde estés.</p>
           <div className="auth-hero-stats">
             <div>
-              <strong>15m</strong>
-              <span>access token corto</span>
+              <strong>Registra</strong>
+              <span>tus pagos en segundos</span>
             </div>
             <div>
-              <strong>JWT</strong>
-              <span>refresh automatico</span>
+              <strong>Controla</strong>
+              <span>tu caja al día</span>
             </div>
             <div>
-              <strong>Sheets</strong>
-              <span>usuarios en config_auth_users</span>
+              <strong>Supervisa</strong>
+              <span>agentes y bancos</span>
             </div>
           </div>
         </div>
@@ -112,7 +110,7 @@ export default function LoginPage() {
               value={username}
               onChange={(event) => setUsername(event.target.value)}
               autoComplete="username"
-              placeholder="admin"
+              placeholder="Tu usuario"
               required
             />
           </label>
@@ -125,7 +123,7 @@ export default function LoginPage() {
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               autoComplete="current-password"
-              placeholder="admin123"
+              placeholder="Tu contraseña"
               required
             />
           </label>
@@ -134,10 +132,6 @@ export default function LoginPage() {
             {submitting ? 'Validando...' : 'Entrar'}
           </button>
         </form>
-
-        <div className="auth-note">
-          <strong>Bootstrap de desarrollo:</strong> admin / admin123
-        </div>
       </div>
     </div>
   );

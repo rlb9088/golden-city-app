@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
+import { Fragment, useCallback, useEffect, useState, type ChangeEvent, type ReactNode } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import {
   getBalance,
@@ -86,6 +86,26 @@ function EmptyState({ icon, message }: { icon: string; message: string }) {
       <div className="empty-state-icon">{icon}</div>
       <p>{message}</p>
     </div>
+  );
+}
+
+function BalanceDetailToggle({
+  summaryLabel,
+  hint,
+  children,
+}: {
+  summaryLabel: string;
+  hint: string;
+  children: ReactNode;
+}) {
+  return (
+    <details className="balance-details">
+      <summary className="balance-details-summary">
+        <span>{summaryLabel}</span>
+        <span className="balance-details-hint">{hint}</span>
+      </summary>
+      <div className="balance-details-body">{children}</div>
+    </details>
   );
 }
 
@@ -419,27 +439,36 @@ export default function BalancePage() {
                 </thead>
                 <tbody>
                   {agentGroups.map((agent) => (
-                    <tr key={agent.agente}>
-                      <td>
-                        <strong>{agent.agente}</strong>
-                      </td>
-                      <td className="text-right">
-                        <span className={`amount ${agent.total >= 0 ? 'amount-positive' : 'amount-negative'}`}>
-                          {formatCurrency(agent.total)}
-                        </span>
-                      </td>
-                      <td>
-                        <details className="balance-details">
-                          <summary className="balance-details-summary">
-                            <span>{agent.bancos.length} banco(s)</span>
-                            <span className="balance-details-hint">Ver detalle</span>
-                          </summary>
-                          <div className="balance-details-body">
+                    <Fragment key={agent.agente}>
+                      <tr key={`${agent.agente}-main`}>
+                        <td>
+                          <strong>{agent.agente}</strong>
+                        </td>
+                        <td className="text-right">
+                          <span className={`amount ${agent.total >= 0 ? 'amount-positive' : 'amount-negative'}`}>
+                            {formatCurrency(agent.total)}
+                          </span>
+                        </td>
+                        <td className="balance-detail-cell">
+                          <BalanceDetailToggle
+                            summaryLabel={`${agent.bancos.length} banco(s)`}
+                            hint="Ver detalle"
+                          >
                             <AgentBreakdownTable agent={agent} />
-                          </div>
-                        </details>
-                      </td>
-                    </tr>
+                          </BalanceDetailToggle>
+                        </td>
+                      </tr>
+                      <tr key={`${agent.agente}-detail`} className="detail-row">
+                        <td colSpan={3}>
+                          <BalanceDetailToggle
+                            summaryLabel={`${agent.bancos.length} banco(s)`}
+                            hint="Ver detalle"
+                          >
+                            <AgentBreakdownTable agent={agent} />
+                          </BalanceDetailToggle>
+                        </td>
+                      </tr>
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
@@ -507,25 +536,34 @@ export default function BalancePage() {
                 </thead>
                 <tbody>
                   {expenseGroups.map((group) => (
-                    <tr key={group.categoria}>
-                      <td>
-                        <strong>{group.categoria}</strong>
-                      </td>
-                      <td className="text-right">
-                        <span className="amount amount-negative">{formatCurrency(group.total)}</span>
-                      </td>
-                      <td>
-                        <details className="balance-details">
-                          <summary className="balance-details-summary">
-                            <span>{group.detalle.length} subcategoria(s)</span>
-                            <span className="balance-details-hint">Ver detalle</span>
-                          </summary>
-                          <div className="balance-details-body">
+                    <Fragment key={group.categoria}>
+                      <tr key={`${group.categoria}-main`}>
+                        <td>
+                          <strong>{group.categoria}</strong>
+                        </td>
+                        <td className="text-right">
+                          <span className="amount amount-negative">{formatCurrency(group.total)}</span>
+                        </td>
+                        <td className="balance-detail-cell">
+                          <BalanceDetailToggle
+                            summaryLabel={`${group.detalle.length} subcategoria(s)`}
+                            hint="Ver detalle"
+                          >
                             <ExpenseBreakdownTable group={group} />
-                          </div>
-                        </details>
-                      </td>
-                    </tr>
+                          </BalanceDetailToggle>
+                        </td>
+                      </tr>
+                      <tr key={`${group.categoria}-detail`} className="detail-row">
+                        <td colSpan={3}>
+                          <BalanceDetailToggle
+                            summaryLabel={`${group.detalle.length} subcategoria(s)`}
+                            hint="Ver detalle"
+                          >
+                            <ExpenseBreakdownTable group={group} />
+                          </BalanceDetailToggle>
+                        </td>
+                      </tr>
+                    </Fragment>
                   ))}
                 </tbody>
               </table>

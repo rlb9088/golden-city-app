@@ -2,7 +2,7 @@ const ingresosService = require('./ingresos.service');
 const pagosService = require('./pagos.service');
 const gastosService = require('./gastos.service');
 const bancosService = require('./bancos.service');
-const { getTable, getAdminBankIds, getAgentBankIds, getSetting } = require('./config.service');
+const { getTable, getAdminBankIds, getAgentBankIds, getSetting, getCajaInicioMesByBanco } = require('./config.service');
 const { todayLima } = require('../config/timezone');
 
 function normalizeText(value) {
@@ -336,6 +336,29 @@ function getAgentOwnedBanks(configBanks, agente, agentes = []) {
   });
 }
 
+function sumBankMovements(rows, bankId, targetDate, { exactDate = false, dateField = 'fecha_movimiento' } = {}) {
+  const bankKey = normalizeLookup(bankId);
+
+  return rows
+    .filter((row) => isActivo(row)
+      && normalizeLookup(row.banco_id) === bankKey
+      && getRecordDate(row, dateField)
+      && (
+        exactDate
+          ? getRecordDate(row, dateField) === targetDate
+          : getRecordDate(row, dateField) <= targetDate
+      ))
+    .reduce((sum, row) => sum + parseAmount(row.monto), 0);
+}
+
+function getEffectiveInitialAmount(setting, targetDate) {
+  if (!setting?.fecha_efectiva) {
+    return 0;
+  }
+
+  return setting.fecha_efectiva <= targetDate ? parseAmount(setting.value) : 0;
+}
+
 async function loadBalanceContext() {
   const [ingresos, pagos, gastos, bancos, bancosSnapshots, agentes, adminBankIds, agentBankIds, cajaInicioMesSetting] = await Promise.all([
     ingresosService.getAll(),
@@ -429,11 +452,10 @@ async function getAgentCajaAt({ agente, fecha = null } = {}, context = null) {
   const ctx = context || await loadBalanceContext();
   const { targetDate, requestedDate, isNowMode } = resolveRequestedDate(fecha, ctx.todayDate);
   const agentBanks = getAgentOwnedBanks(ctx.bancos, agente, ctx.agentes);
-  const allowedBankIds = new Set(agentBanks.map((bank) => normalizeLookup(bank.id)).filter(Boolean));
   const agentRecord = resolveAgentRecord(agente, ctx.agentes);
   const agentLabel = normalizeText(agentRecord?.nombre || agente);
 
-  if (allowedBankIds.size === 0) {
+  if (agentBanks.length === 0) {
     return {
       fecha: isNowMode ? null : requestedDate,
       agente: agentLabel,
@@ -447,34 +469,58 @@ async function getAgentCajaAt({ agente, fecha = null } = {}, context = null) {
     };
   }
 
-  const ingresosUpToDate = aggregateIngresosByBank(ctx.ingresos, targetDate, { allowedBankIds });
-  const pagosUpToDate = aggregatePagosByBank(ctx.pagos, targetDate, { allowedBankIds });
-  const cajas = buildCajasDetalle(ingresosUpToDate, pagosUpToDate);
-  const agentDetalle = cajas.detalle.find((item) => normalizeLookup(item.agente) === normalizeLookup(agente));
+  const bankSettings = await Promise.all(agentBanks.map(async (bank) => ({
+    bank,
+    setting: await getCajaInicioMesByBanco(bank.id),
+  })));
   const previousDate = subtractOneDay(targetDate);
-  const previousIngresos = aggregateIngresosByBank(ctx.ingresos, previousDate, { allowedBankIds });
-  const previousPagos = aggregatePagosByBank(ctx.pagos, previousDate, { allowedBankIds });
-  const montoInicial = buildCajasDetalle(previousIngresos, previousPagos).total;
-  const pagosDia = aggregatePagosByBank(ctx.pagos, targetDate, {
-    exactDate: true,
-    allowedBankIds,
-  }).reduce((sum, row) => sum + parseAmount(row.monto), 0);
-  const bancos = (agentDetalle?.bancos || []).map((item) => ({
-    banco_id: item.banco_id,
-    banco: item.banco,
-    saldo: parseAmount(item.saldo),
-  }));
+  const bancos = bankSettings
+    .map(({ bank, setting }) => {
+      const initialAmount = getEffectiveInitialAmount(setting, targetDate);
+      const saldoMovimientos = sumBankMovements(ctx.ingresos, bank.id, targetDate, {
+        dateField: 'fecha_movimiento',
+      }) - sumBankMovements(ctx.pagos, bank.id, targetDate, {
+        dateField: 'fecha_comprobante',
+      });
+      const saldoInicial = sumBankMovements(ctx.ingresos, bank.id, previousDate, {
+        dateField: 'fecha_movimiento',
+      }) - sumBankMovements(ctx.pagos, bank.id, previousDate, {
+        dateField: 'fecha_comprobante',
+      }) + initialAmount;
+
+      return {
+        banco_id: bank.id,
+        banco: normalizeText(bank.nombre) || normalizeText(bank.id),
+        saldo: saldoMovimientos + initialAmount,
+        saldoInicial,
+      };
+    })
+    .sort((a, b) => String(a.banco ?? '').localeCompare(String(b.banco ?? ''), 'es', { sensitivity: 'base' })
+      || String(a.banco_id ?? '').localeCompare(String(b.banco_id ?? ''), 'es', { sensitivity: 'base' }));
+
+  const montoInicial = bancos.reduce((sum, bank) => sum + parseAmount(bank.saldoInicial), 0);
+  const pagosDia = bankSettings.reduce((sum, { bank }) => (
+    sum + sumBankMovements(ctx.pagos, bank.id, targetDate, {
+      exactDate: true,
+      dateField: 'fecha_comprobante',
+    })
+  ), 0);
+  const total = bancos.reduce((sum, bank) => sum + parseAmount(bank.saldo), 0);
 
   return {
     fecha: isNowMode ? null : requestedDate,
     agente: agentLabel,
-    total: cajas.total,
+    total,
     movimiento: {
       montoInicial,
       pagosDia,
       saldoTotal: montoInicial - pagosDia,
     },
-    bancos,
+    bancos: bancos.map((bank) => ({
+      banco_id: bank.banco_id,
+      banco: bank.banco,
+      saldo: parseAmount(bank.saldo),
+    })),
   };
 }
 

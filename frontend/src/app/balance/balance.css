@@ -53,6 +53,11 @@
   font: inherit;
 }
 
+.balance-date-field input::-webkit-calendar-picker-indicator {
+  filter: invert(1) opacity(0.7);
+  cursor: pointer;
+}
+
 .balance-date-field input:focus {
   outline: none;
   border-color: var(--accent-gold);
@@ -225,6 +230,22 @@
   padding: 10px 12px;
 }
 
+.balance-bank-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.balance-bank-meta {
+  margin-top: 0.25rem;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.detail-row {
+  display: none;
+}
+
 .skeleton-card {
   height: 100px;
   background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-card-hover) 50%, var(--bg-card) 75%);
@@ -284,11 +305,94 @@
     font-size: 0.95rem;
   }
 
-  .table {
-    min-width: 640px;
+  #balance-page .table,
+  #balance-page .balance-nested-table {
+    min-width: 0;
+    width: 100%;
+    table-layout: fixed;
   }
 
-  .balance-nested-table {
-    min-width: 520px;
+  #balance-page .table th,
+  #balance-page .table td,
+  #balance-page .balance-nested-table th,
+  #balance-page .balance-nested-table td {
+    padding: 10px 12px;
+  }
+
+  #mi-caja-movement-table th:first-child,
+  #mi-caja-movement-table td:first-child,
+  #mi-caja-banks-table th:first-child,
+  #mi-caja-banks-table td:first-child,
+  #admin-banks-table th:first-child,
+  #admin-banks-table td:first-child,
+  #balance-page .balance-nested-table th:first-child,
+  #balance-page .balance-nested-table td:first-child {
+    width: 60%;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  #mi-caja-movement-table th:last-child,
+  #mi-caja-movement-table td:last-child,
+  #mi-caja-banks-table th:last-child,
+  #mi-caja-banks-table td:last-child,
+  #admin-banks-table th:last-child,
+  #admin-banks-table td:last-child,
+  #balance-page .balance-nested-table th:last-child,
+  #balance-page .balance-nested-table td:last-child {
+    width: 40%;
+  }
+
+  #agent-balance-table th:nth-child(3),
+  #agent-balance-table td:nth-child(3),
+  #expense-breakdown-table th:nth-child(3),
+  #expense-breakdown-table td:nth-child(3) {
+    display: none;
+  }
+
+  #agent-balance-table thead th:nth-child(1),
+  #agent-balance-table tbody tr:not(.detail-row) td:nth-child(1),
+  #expense-breakdown-table thead th:nth-child(1),
+  #expense-breakdown-table tbody tr:not(.detail-row) td:nth-child(1) {
+    width: 60%;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  #agent-balance-table thead th:nth-child(2),
+  #agent-balance-table tbody tr:not(.detail-row) td:nth-child(2),
+  #expense-breakdown-table thead th:nth-child(2),
+  #expense-breakdown-table tbody tr:not(.detail-row) td:nth-child(2) {
+    width: 40%;
+  }
+
+  #agent-balance-table .detail-row,
+  #expense-breakdown-table .detail-row {
+    display: table-row;
+  }
+
+  #agent-balance-table .detail-row td,
+  #expense-breakdown-table .detail-row td {
+    display: table-cell;
+    padding-top: 0;
+    padding-bottom: 14px;
+    border-bottom: none;
+  }
+
+  #agent-balance-table .detail-row .balance-details,
+  #expense-breakdown-table .detail-row .balance-details,
+  #agent-balance-table .balance-detail-cell .balance-details,
+  #expense-breakdown-table .balance-detail-cell .balance-details {
+    width: 100%;
+  }
+
+  #agent-balance-table .balance-details-summary,
+  #expense-breakdown-table .balance-details-summary {
+    width: 100%;
+  }
+
+  #agent-balance-table .balance-details-body,
+  #expense-breakdown-table .balance-details-body {
+    padding-top: 0.65rem;
   }
 }

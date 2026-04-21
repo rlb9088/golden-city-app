@@ -32,6 +32,11 @@ export interface ConfigSetting {
   fecha_efectiva: string;
 }
 
+export interface CajaInicioMesBancoValue {
+  value: number;
+  fecha_efectiva: string | null;
+}
+
 export interface StoredAuthSession {
   accessToken: string;
   refreshToken: string;
@@ -463,6 +468,18 @@ export async function updateSetting(key: string, value: string | number, fechaEf
       value,
       fecha_efectiva: fechaEfectiva,
     }),
+  });
+}
+
+export async function getCajaInicioMesBanco(bancoId: string) {
+  const response = await request<{ status: string; data: CajaInicioMesBancoValue }>(`/api/config/settings/caja_inicio_mes/banco/${encodeURIComponent(bancoId)}`);
+  return response.data;
+}
+
+export async function updateCajaInicioMesBanco(bancoId: string, payload: { value: number; fecha_efectiva: string }) {
+  await request<{ status: string; data: ConfigSetting }>(`/api/config/settings/caja_inicio_mes/banco/${encodeURIComponent(bancoId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
   });
 }
 

@@ -25,6 +25,7 @@ const TABLES = {
 const SETTINGS_SHEET = 'config_settings';
 const SETTINGS_HEADERS = ['key', 'value', 'fecha_efectiva', 'actualizado_por', 'actualizado_en'];
 const SETTINGS_SEED_KEY = 'caja_inicio_mes';
+const SETTINGS_KEY_REGEX = /^caja_inicio_mes(?::banco:[a-z0-9_-]+)?$/i;
 const BANK_CLASSIFICATION_TTL_MS = 30_000;
 
 // Default seed data (used when tables are empty)
@@ -83,6 +84,17 @@ function normalizeSettingKey(value) {
   return normalizeLookup(value);
 }
 
+function assertValidSettingKey(key) {
+  const normalizedKey = normalizeSettingKey(key);
+  if (!normalizedKey || !SETTINGS_KEY_REGEX.test(normalizedKey)) {
+    throw new BadRequestError('La clave de configuracion no tiene un formato valido.', {
+      context: { tableName: SETTINGS_SHEET, key: normalizedKey },
+    });
+  }
+
+  return normalizedKey;
+}
+
 function normalizeSettingValue(value) {
   return normalizeText(value);
 }
@@ -132,7 +144,7 @@ function formatSettingForRead(record) {
   return {
     key: normalized.key,
     value: parseSettingValue(normalized.value),
-    fecha_efectiva: normalized.fecha_efectiva,
+    fecha_efectiva: normalized.fecha_efectiva || null,
   };
 }
 
@@ -600,12 +612,7 @@ async function getConfigBancoById(bancoId) {
 }
 
 async function getSetting(key) {
-  const normalizedKey = normalizeSettingKey(key);
-  if (!normalizedKey) {
-    throw new BadRequestError('La clave de configuracion es obligatoria.', {
-      context: { tableName: SETTINGS_SHEET },
-    });
-  }
+  const normalizedKey = assertValidSettingKey(key);
 
   let rows = [];
   try {
@@ -641,12 +648,7 @@ async function getSetting(key) {
 }
 
 async function upsertSetting(key, item, user = 'system') {
-  const normalizedKey = normalizeSettingKey(key);
-  if (!normalizedKey) {
-    throw new BadRequestError('La clave de configuracion es obligatoria.', {
-      context: { tableName: SETTINGS_SHEET },
-    });
-  }
+  const normalizedKey = assertValidSettingKey(key);
 
   const source = item && typeof item === 'object' ? item : {};
   const value = normalizeSettingValue(source.value);
@@ -696,6 +698,34 @@ async function upsertSetting(key, item, user = 'system') {
   await repo.append(SETTINGS_SHEET, nextRecord, SETTINGS_HEADERS);
   await audit.log('create', 'config_settings', user, formatSettingForRead(nextRecord));
   return formatSettingForRead(nextRecord);
+}
+
+async function getCajaInicioMesByBanco(bancoId) {
+  const id = normalizeText(bancoId);
+  if (!id) {
+    throw new BadRequestError('El banco es obligatorio para consultar la caja de inicio de mes.', {
+      context: {
+        tableName: SETTINGS_SHEET,
+      },
+    });
+  }
+
+  try {
+    const record = await getSetting(`caja_inicio_mes:banco:${id}`);
+    return {
+      value: Number(record.value),
+      fecha_efectiva: record.fecha_efectiva || null,
+    };
+  } catch (error) {
+    if (error?.statusCode === 404) {
+      return {
+        value: 0,
+        fecha_efectiva: null,
+      };
+    }
+
+    throw error;
+  }
 }
 
 async function existsInTable(tableName, value, field = 'nombre', matcher = null) {
@@ -1214,7 +1244,9 @@ module.exports = {
   getAdminBankIds,
   getAgentBankIds,
   classifyBanco,
+  getBankClassificationFromRecord,
   getSetting,
+  getCajaInicioMesByBanco,
   addToTable,
   updateInTable,
   updateAgentPassword,

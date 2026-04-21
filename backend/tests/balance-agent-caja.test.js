@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-function loadBalanceService() {
+function loadBalanceService({ cajaInicioMesByBanco = {} } = {}) {
   const balancePath = require.resolve('../services/balance.service');
   const ingresosPath = require.resolve('../services/ingresos.service');
   const pagosPath = require.resolve('../services/pagos.service');
@@ -65,6 +65,10 @@ function loadBalanceService() {
       getAdminBankIds: async () => new Set(),
       getAgentBankIds: async () => new Set(),
       getSetting: async () => ({ value: 0 }),
+      getCajaInicioMesByBanco: async (bancoId) => cajaInicioMesByBanco[bancoId] || {
+        value: 0,
+        fecha_efectiva: null,
+      },
     },
   };
 
@@ -102,7 +106,7 @@ function buildContext({
   };
 }
 
-test('agente sin movimientos devuelve ceros y sin bancos', async () => {
+test('agente sin movimientos devuelve ceros y mantiene sus bancos configurados', async () => {
   const service = loadBalanceService();
   const context = buildContext({
     agentes: [
@@ -124,7 +128,9 @@ test('agente sin movimientos devuelve ceros y sin bancos', async () => {
       pagosDia: 0,
       saldoTotal: 0,
     },
-    bancos: [],
+    bancos: [
+      { banco_id: 'BK-1', banco: 'Caja 1', saldo: 0 },
+    ],
   });
 });
 
@@ -299,7 +305,79 @@ test('agente B no ve datos del agente A', async () => {
       pagosDia: 0,
       saldoTotal: 0,
     },
-    bancos: [],
+    bancos: [
+      { banco_id: 'BK-B', banco: 'Caja B', saldo: 0 },
+    ],
+  });
+});
+
+test('agente con caja inicial por banco suma saldo y montoInicial', async () => {
+  const service = loadBalanceService({
+    cajaInicioMesByBanco: {
+      'BK-1': { value: 500, fecha_efectiva: '2026-04-01' },
+      'BK-2': { value: 200, fecha_efectiva: '2026-04-01' },
+    },
+  });
+  const context = buildContext({
+    agentes: [
+      { id: 'AG-1', nombre: 'Agente 1', username: 'agente1' },
+    ],
+    bancos: [
+      { id: 'BK-1', nombre: 'Caja 1', propietario_id: 'AG-1' },
+      { id: 'BK-2', nombre: 'Caja 2', propietario_id: 'AG-1' },
+    ],
+  });
+
+  const result = await service.getAgentCajaAt({ agente: 'Agente 1', fecha: '2026-04-20' }, context);
+
+  assert.deepStrictEqual(result, {
+    fecha: '2026-04-20',
+    agente: 'Agente 1',
+    total: 700,
+    movimiento: {
+      montoInicial: 700,
+      pagosDia: 0,
+      saldoTotal: 700,
+    },
+    bancos: [
+      { banco_id: 'BK-1', banco: 'Caja 1', saldo: 500 },
+      { banco_id: 'BK-2', banco: 'Caja 2', saldo: 200 },
+    ],
+  });
+});
+
+test('fecha consultada anterior a fecha efectiva no aplica el monto inicial del banco', async () => {
+  const service = loadBalanceService({
+    cajaInicioMesByBanco: {
+      'BK-1': { value: 500, fecha_efectiva: '2026-04-21' },
+      'BK-2': { value: 200, fecha_efectiva: '2026-04-01' },
+    },
+  });
+  const context = buildContext({
+    agentes: [
+      { id: 'AG-1', nombre: 'Agente 1', username: 'agente1' },
+    ],
+    bancos: [
+      { id: 'BK-1', nombre: 'Caja 1', propietario_id: 'AG-1' },
+      { id: 'BK-2', nombre: 'Caja 2', propietario_id: 'AG-1' },
+    ],
+  });
+
+  const result = await service.getAgentCajaAt({ agente: 'Agente 1', fecha: '2026-04-20' }, context);
+
+  assert.deepStrictEqual(result, {
+    fecha: '2026-04-20',
+    agente: 'Agente 1',
+    total: 200,
+    movimiento: {
+      montoInicial: 200,
+      pagosDia: 0,
+      saldoTotal: 200,
+    },
+    bancos: [
+      { banco_id: 'BK-1', banco: 'Caja 1', saldo: 0 },
+      { banco_id: 'BK-2', banco: 'Caja 2', saldo: 200 },
+    ],
   });
 });
 

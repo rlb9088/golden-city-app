@@ -89,6 +89,51 @@ async function detectTextWithTesseract(base64Data, reason) {
   return data.text || '';
 }
 
+function normalizeMeridiem(meridiem) {
+  if (!meridiem) {
+    return '';
+  }
+
+  const cleaned = String(meridiem).toLowerCase().replace(/[^apm]/g, '');
+  if (cleaned.startsWith('a')) {
+    return 'am';
+  }
+
+  if (cleaned.startsWith('p')) {
+    return 'pm';
+  }
+
+  return '';
+}
+
+function normalizeTime(hhmm, meridiem) {
+  const timeMatch = String(hhmm ?? '').trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!timeMatch) {
+    return '';
+  }
+
+  let hour = parseInt(timeMatch[1], 10);
+  const minute = timeMatch[2];
+  const normalizedMeridiem = normalizeMeridiem(meridiem);
+
+  if (normalizedMeridiem === 'pm' && hour < 12) {
+    hour += 12;
+  } else if (normalizedMeridiem === 'am' && hour === 12) {
+    hour = 0;
+  }
+
+  return `${String(hour).padStart(2, '0')}:${minute}`;
+}
+
+function appendNormalizedTime(datePart, time, meridiem) {
+  if (!time) {
+    return datePart;
+  }
+
+  const normalizedTime = normalizeTime(time, meridiem);
+  return normalizedTime ? `${datePart} ${normalizedTime}` : datePart;
+}
+
 function extractFinancialData(rawText) {
   let amount = null;
   let date = null;
@@ -112,8 +157,9 @@ function extractFinancialData(rawText) {
     amount = Math.max(...amounts);
   }
 
-  const dateRegexStandard = /(?:\b|\s)(\d{2})\s*[\/\-]\s*(\d{2})\s*[\/\-]\s*(\d{2,4})(?:(?:\s*-\s*|\s+|,\s*)(\d{1,2}:\d{2}(?:\s*|:)(?:[aAp]|\.|\s|m)*))?(?:\b|\s)/g;
-  const dateRegexText = /(?:\b|\s)(\d{1,2})\s*(?:de\s*)?(Ene|Feb|Mar|Abr|May|Jun|Jul|Ago|Sep|Oct|Nov|Dic|Enero|Febrero|Marzo|Abril|Mayo|Junio|Julio|Agosto|Septiembre|Octubre|Noviembre|Diciembre)\.?\s*(?:de\s*)?(\d{2,4})(?:(?:\s*-\s*|\s+|,\s*)(\d{1,2}:\d{2}(?:\s*|:)(?:[aAp]|\.|\s|m)*))?(?:\b|\s)/ig;
+  const timePattern = '(\\d{1,2}:\\d{2})(?:\\s*([ap](?:\\.?\\s*m\\.?)?))?';
+  const dateRegexStandard = new RegExp(`(?:\\b|\\s)(\\d{2})\\s*[\\/\\-]\\s*(\\d{2})\\s*[\\/\\-]\\s*(\\d{2,4})(?:(?:\\s*-\\s*|\\s+|,\\s*)${timePattern})?(?:\\b|\\s)`, 'gi');
+  const dateRegexText = new RegExp(`(?:\\b|\\s)(\\d{1,2})\\s*(?:de\\s*)?(Ene|Feb|Mar|Abr|May|Jun|Jul|Ago|Sep|Oct|Nov|Dic|Enero|Febrero|Marzo|Abril|Mayo|Junio|Julio|Agosto|Septiembre|Octubre|Noviembre|Diciembre)\\.?\\s*(?:de\\s*)?(\\d{2,4})(?:(?:\\s*-\\s*|\\s+|,\\s*)${timePattern})?(?:\\b|\\s)`, 'gi');
   const dates = [];
 
   while ((match = dateRegexStandard.exec(text)) !== null) {
@@ -121,8 +167,7 @@ function extractFinancialData(rawText) {
     const month = match[2].padStart(2, '0');
     let year = match[3];
     if (year.length === 2) year = '20' + year;
-    const time = match[4] ? ` ${match[4].trim()}` : '';
-    dates.push(`${year}-${month}-${day}${time}`);
+    dates.push(appendNormalizedTime(`${year}-${month}-${day}`, match[4], match[5]));
   }
 
   let textMatch;
@@ -133,9 +178,9 @@ function extractFinancialData(rawText) {
     const month = monthMap[monthStr];
     let year = textMatch[3];
     if (year.length === 2) year = '20' + year;
-    const time = textMatch[4] ? ` ${textMatch[4].trim()}` : '';
-
-    if (month) dates.push(`${year}-${month}-${day}${time}`);
+    if (month) {
+      dates.push(appendNormalizedTime(`${year}-${month}-${day}`, textMatch[4], textMatch[5]));
+    }
   }
 
   if (dates.length > 0) {
@@ -151,4 +196,4 @@ function extractFinancialData(rawText) {
   return { amount, date };
 }
 
-module.exports = { analyzeReceipt };
+module.exports = { analyzeReceipt, extractFinancialData, normalizeTime };

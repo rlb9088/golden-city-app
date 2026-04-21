@@ -8,7 +8,7 @@
 
 | Total | Completados | En progreso/Parcial | Pendientes |
 |-------|-------------|---------------------|------------|
-| 76 | 57 | 0 | 19 |
+| 82 | 57 | 0 | 25 |
 
 ---
 
@@ -205,6 +205,21 @@
 | 076 | [Docs + E2E + UAT "Mi Caja"](./TICKET-076-balance-mi-caja-e2e-docs.md) | 🔴 | ~2h | P2 |
 
 > **Nota Sprint 14**: Orden sugerido 070 → 071 → 072 → 073 → 074 → 075 → 076. Backend (070-072) puede ejecutarse en paralelo con el frontend inicial (073). El 075 depende de 074 para poder probar la navegación. Cerrar 076 solo cuando todos los UAT pasen.
+
+---
+
+## Sprint 15 - Ajustes UX & caja por banco (🔴 Pendiente)
+
+| # | Ticket | Estado | Esfuerzo | Prioridad |
+|---|--------|--------|----------|-----------|
+| 077 | [Fix: calendario nativo en Balance (desktop)](./TICKET-077-fix-balance-date-picker-desktop.md) | 🔴 | ~0.5h | P1 |
+| 078 | [Balance: tablas responsivas en móvil](./TICKET-078-balance-tablas-responsivas-movil.md) | 🔴 | ~2.5h | P1 |
+| 079 | [OCR: interpretar AM/PM → hora en 24h](./TICKET-079-ocr-hora-am-pm-24h.md) | 🔴 | ~1.5h | P1 |
+| 080 | [Login: rediseño copy e info cards](./TICKET-080-login-copy-redesign.md) | 🔴 | ~1h | P2 |
+| 081 | [Backend: `caja_inicio_mes` por banco de agente](./TICKET-081-backend-caja-inicio-mes-por-banco-agente.md) | 🔴 | ~3.5h | P0 |
+| 082 | [Frontend: UI `caja_inicio_mes` por banco de agente](./TICKET-082-frontend-caja-inicio-mes-por-banco-agente.md) | 🔴 | ~2h | P1 |
+
+> **Nota Sprint 15**: Los tickets 077-080 son independientes entre sí y pueden ejecutarse en cualquier orden. El 082 depende del 081. Orden sugerido: 077 → 080 → 079 → 078 → 081 → 082.
 
 ---
 

@@ -28,10 +28,17 @@ function verifyToken(req, res, next) {
 
   try {
     const auth = authService.verifyToken(token);
+    const user = {
+      id: auth.userId,
+      username: auth.username,
+      role: auth.role,
+      nombre: auth.nombre || auth.username,
+    };
     req.auth = {
       ...auth,
-      user: auth.nombre || auth.username,
+      user: user.nombre,
     };
+    req.user = user;
     return next();
   } catch (error) {
     return next(new UnauthorizedError('Token inválido o expirado.', {

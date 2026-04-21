@@ -105,3 +105,37 @@ test('analyzeReceipt falls back to Tesseract when Vision request fails', async (
     restore();
   }
 });
+
+test('normalizeTime convierte meridiem y conserva horas 24h ambiguas', () => {
+  const { service, restore } = loadServiceWithMocks();
+
+  try {
+    const cases = [
+      { time: '2:30', meridiem: 'PM', expected: '14:30' },
+      { time: '12:15', meridiem: 'AM', expected: '00:15' },
+      { time: '11:59', meridiem: 'PM', expected: '23:59' },
+      { time: '9:00', meridiem: undefined, expected: '09:00' },
+      { time: '13:45', meridiem: undefined, expected: '13:45' },
+      { time: '12:00', meridiem: 'PM', expected: '12:00' },
+      { time: '12:00', meridiem: 'AM', expected: '00:00' },
+    ];
+
+    for (const { time, meridiem, expected } of cases) {
+      assert.equal(service.normalizeTime(time, meridiem), expected);
+    }
+  } finally {
+    restore();
+  }
+});
+
+test('extractFinancialData normaliza la hora escrita con p.m.', () => {
+  const { service, restore } = loadServiceWithMocks();
+
+  try {
+    const result = service.extractFinancialData('15 de Abril 2026, 3:20 p.m.');
+
+    assert.equal(result.date, '2026-04-15 15:20');
+  } finally {
+    restore();
+  }
+});

@@ -387,6 +387,106 @@ async function seedConfigSettings(sheets, spreadsheetId) {
   return { seeded: true };
 }
 
+async function seedBankCajaInicioMesSettings(sheets, spreadsheetId) {
+  const [agentesResponse, bancosResponse, settingsResponse] = await Promise.all([
+    sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: 'config_agentes!A:Z',
+      valueRenderOption: 'UNFORMATTED_VALUE',
+    }),
+    sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: 'config_bancos!A:Z',
+      valueRenderOption: 'UNFORMATTED_VALUE',
+    }),
+    sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: 'config_settings!A:E',
+      valueRenderOption: 'UNFORMATTED_VALUE',
+    }),
+  ]);
+
+  const agentesRows = agentesResponse.data.values || [];
+  const bancosRows = bancosResponse.data.values || [];
+  const settingsRows = settingsResponse.data.values || [];
+
+  if (agentesRows.length < 2 || bancosRows.length < 2) {
+    return { seeded: 0 };
+  }
+
+  const agentesHeaders = agentesRows[0];
+  const agentes = agentesRows.slice(1).map((row) => {
+    const obj = {};
+    agentesHeaders.forEach((header, index) => {
+      obj[header] = row[index] ?? '';
+    });
+    return obj;
+  });
+
+  const agentesById = new Map();
+  for (const agente of agentes) {
+    const id = normalizeText(agente.id);
+    if (!id) {
+      continue;
+    }
+    agentesById.set(normalizeLookup(id), agente);
+  }
+
+  const bancosHeaders = bancosRows[0];
+  const bancos = bancosRows.slice(1).map((row) => {
+    const obj = {};
+    bancosHeaders.forEach((header, index) => {
+      obj[header] = row[index] ?? '';
+    });
+    return obj;
+  });
+
+  const existingKeys = new Set(
+    settingsRows.slice(1).map((row) => normalizeLookup(row[0])),
+  );
+
+  const rowsToAppend = [];
+  for (const banco of bancos) {
+    const bancoId = normalizeText(banco.id);
+    const propietarioId = normalizeText(banco.propietario_id);
+    if (!bancoId || !propietarioId) {
+      continue;
+    }
+
+    const agente = agentesById.get(normalizeLookup(propietarioId));
+    if (!agente || normalizeLookup(agente.role) === 'admin') {
+      continue;
+    }
+
+    const key = `caja_inicio_mes:banco:${bancoId}`;
+    if (existingKeys.has(normalizeLookup(key))) {
+      continue;
+    }
+
+    rowsToAppend.push([
+      key,
+      '0',
+      '',
+      'system',
+      new Date().toISOString(),
+    ]);
+  }
+
+  if (rowsToAppend.length === 0) {
+    return { seeded: 0 };
+  }
+
+  await sheets.spreadsheets.values.append({
+    spreadsheetId,
+    range: 'config_settings!A:E',
+    valueInputOption: 'RAW',
+    insertDataOption: 'INSERT_ROWS',
+    requestBody: { values: rowsToAppend },
+  });
+
+  return { seeded: rowsToAppend.length };
+}
+
 async function verifyHeaders(sheets, spreadsheetId) {
   const failures = [];
 
@@ -448,6 +548,11 @@ async function main() {
       console.log(`[SheetsSetup] Backfilled config_bancos.owner_id for ${ownerBackfill.updated} rows.`);
     }
 
+    const bankSettingsSeed = await seedBankCajaInicioMesSettings(sheets, spreadsheetId);
+    if (bankSettingsSeed.seeded > 0) {
+      console.log(`[SheetsSetup] Seeded ${bankSettingsSeed.seeded} config_settings entries for bank caja_inicio_mes.`);
+    }
+
     const failures = await verifyHeaders(sheets, spreadsheetId);
     if (failures.length > 0) {
       console.error('[SheetsSetup] Header verification failed.');
@@ -498,4 +603,5 @@ module.exports = {
   normalizeText,
   getFirstDayOfCurrentMonthLima,
   seedConfigSettings,
+  seedBankCajaInicioMesSettings,
 };

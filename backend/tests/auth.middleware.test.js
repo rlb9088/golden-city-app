@@ -51,6 +51,12 @@ test('verifyToken extrae el bearer token y adjunta req.auth', () => {
     nombre: 'Administrador',
     user: 'Administrador',
   });
+  assert.deepStrictEqual(req.user, {
+    id: 'AUTH-1',
+    username: 'test-token',
+    role: 'admin',
+    nombre: 'Administrador',
+  });
 });
 
 test('requireAdmin rechaza usuarios no administradores', () => {

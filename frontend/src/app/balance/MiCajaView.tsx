@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, type ChangeEvent } from 'react';
 import { useAuth } from '@/lib/auth-context';
-import { getMiCaja, type BalanceBankDetail, type MiCajaSnapshot } from '@/lib/api';
+import { getCajaInicioMesBanco, getMiCaja, type BalanceBankDetail, type CajaInicioMesBancoValue, type MiCajaSnapshot } from '@/lib/api';
 import { formatCurrency, formatDate, getTodayLima } from '@/lib/format';
 import StatsCard from '@/components/StatsCard';
 import AlertBanner from '@/components/AlertBanner';
@@ -24,7 +24,13 @@ function EmptyState({ icon, message }: { icon: string; message: string }) {
   );
 }
 
-function BalanceBanksTable({ bancos }: { bancos: BalanceBankDetail[] }) {
+function BalanceBanksTable({
+  bancos,
+  bankSettings,
+}: {
+  bancos: BalanceBankDetail[];
+  bankSettings: Record<string, CajaInicioMesBancoValue>;
+}) {
   if (bancos.length === 0) {
     return <EmptyState icon="💼" message="No hay bancos registrados para tu caja." />;
   }
@@ -39,16 +45,26 @@ function BalanceBanksTable({ bancos }: { bancos: BalanceBankDetail[] }) {
           </tr>
         </thead>
         <tbody>
-          {bancos.map((bank) => (
-            <tr key={bank.banco_id}>
-              <td>{bank.banco}</td>
-              <td className="text-right">
-                <span className={`amount ${bank.saldo >= 0 ? 'amount-positive' : 'amount-negative'}`}>
-                  {formatCurrency(bank.saldo)}
-                </span>
-              </td>
-            </tr>
-          ))}
+          {bancos.map((bank) => {
+            const bankSetting = bankSettings[bank.banco_id];
+
+            return (
+              <tr key={bank.banco_id}>
+                <td>
+                  <div className="balance-bank-name">{bank.banco}</div>
+                  <div className="balance-bank-meta">
+                    Saldo inicial de mes: {formatCurrency(bankSetting?.value ?? 0)}
+                    {bankSetting?.fecha_efectiva ? ` desde ${formatDate(bankSetting.fecha_efectiva)}` : ''}
+                  </div>
+                </td>
+                <td className="text-right">
+                  <span className={`amount ${bank.saldo >= 0 ? 'amount-positive' : 'amount-negative'}`}>
+                    {formatCurrency(bank.saldo)}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -58,6 +74,7 @@ function BalanceBanksTable({ bancos }: { bancos: BalanceBankDetail[] }) {
 export default function MiCajaView() {
   const { isReady, user } = useAuth();
   const [caja, setCaja] = useState<MiCajaSnapshot | null>(null);
+  const [bankSettings, setBankSettings] = useState<Record<string, CajaInicioMesBancoValue>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
@@ -75,9 +92,24 @@ export default function MiCajaView() {
     try {
       const response = await getMiCaja(fecha);
       setCaja(response.data);
+      const settings = await Promise.allSettled(
+        response.data.bancos.map(async (bank) => {
+          const setting = await getCajaInicioMesBanco(bank.banco_id);
+          return [bank.banco_id, setting] as const;
+        }),
+      );
+      const nextSettings = settings.reduce<Record<string, CajaInicioMesBancoValue>>((acc, result) => {
+        if (result.status === 'fulfilled') {
+          const [bankId, setting] = result.value;
+          acc[bankId] = setting;
+        }
+        return acc;
+      }, {});
+      setBankSettings(nextSettings);
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al cargar mi caja');
+      setBankSettings({});
     } finally {
       if (background) {
         setRefreshing(false);
@@ -302,7 +334,7 @@ export default function MiCajaView() {
             <span className="badge badge-blue">{caja.bancos.length} banco(s)</span>
           </div>
 
-          <BalanceBanksTable bancos={caja.bancos} />
+          <BalanceBanksTable bancos={caja.bancos} bankSettings={bankSettings} />
         </section>
       </div>
     </div>

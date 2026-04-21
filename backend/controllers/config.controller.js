@@ -25,6 +25,20 @@ async function upsertSetting(req, res) {
   res.json({ status: 'success', data: record });
 }
 
+async function getCajaInicioMesByBanco(req, res) {
+  const { bancoId } = req.params;
+  const data = await configService.getCajaInicioMesByBanco(bancoId);
+  res.json({ status: 'success', data });
+}
+
+async function upsertCajaInicioMesByBanco(req, res) {
+  const { bancoId } = req.params;
+  const payload = req.validatedData || req.body;
+  const key = `caja_inicio_mes:banco:${bancoId}`;
+  const record = await configService.upsertSetting(key, payload, req.auth.user);
+  res.json({ status: 'success', data: record });
+}
+
 async function addToTable(req, res) {
   const { table } = req.params;
   const record = await configService.addToTable(table, req.body, req.auth.user);
@@ -76,6 +90,8 @@ module.exports = {
   getTable,
   getSetting,
   upsertSetting,
+  getCajaInicioMesByBanco,
+  upsertCajaInicioMesByBanco,
   addToTable,
   updateInTable,
   changePassword,

@@ -88,6 +88,10 @@ function loadBalanceService({
       getSetting: async (key) => (key === 'caja_inicio_mes'
         ? { value: cajaInicioMes }
         : { value: 0 }),
+      getCajaInicioMesByBanco: async () => ({
+        value: 0,
+        fecha_efectiva: null,
+      }),
     },
   };
 
@@ -587,6 +591,8 @@ test('getAgentCajaAt en modo ahora devuelve ceros cuando no hay movimientos', as
       pagosDia: 0,
       saldoTotal: 0,
     },
-    bancos: [],
+    bancos: [
+      { banco_id: 'BK-G1', banco: 'Caja 1', saldo: 0 },
+    ],
   });
 });

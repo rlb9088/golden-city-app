@@ -5,13 +5,16 @@ import { useAuth } from '@/lib/auth-context';
 import {
   addTableRow,
   changeAgentPassword,
+  getCajaInicioMesBanco,
   getConfig,
   getSetting,
   getTableData,
   importTableBatch,
   removeTableRow,
+  updateCajaInicioMesBanco,
   updateSetting,
   updateTableRow,
+  type ConfigBanco,
   type ConfigAgent,
   type ConfigSetting,
 } from '@/lib/api';
@@ -53,6 +56,15 @@ const EDIT_FIELDS = {
 
 type TabKey = (typeof TABS)[number]['id'];
 type ConfigRow = Record<string, string | boolean | undefined> & { id: string };
+type BankConfigRow = ConfigRow & ConfigBanco;
+type AgentBankSetting = {
+  id: string;
+  nombre: string;
+  propietario: string;
+  propietario_id: string;
+  value: string;
+  fecha_efectiva: string;
+};
 
 function normalizeLookup(value: string | number | boolean | undefined) {
   return String(value ?? '').trim().toLowerCase();
@@ -78,6 +90,28 @@ function resolveBancoPropietarioLabel(agentes: ConfigAgent[], row: ConfigRow) {
   return resolved !== 'Agente no encontrado' ? resolved : String(row.propietario || resolved);
 }
 
+function isAgentOwnedBanco(agentes: ConfigAgent[], row: BankConfigRow) {
+  const ownerValue = normalizeLookup(row.propietario_id || row.propietario);
+  const ownerAgent = agentes.find((agente) => normalizeLookup(agente.id) === ownerValue || normalizeLookup(agente.nombre) === ownerValue);
+
+  if (ownerAgent) {
+    return normalizeLookup(ownerAgent.role) === 'agent';
+  }
+
+  return normalizeLookup(row.propietario) === 'agente';
+}
+
+function resolveBancoAgenteNombre(agentes: ConfigAgent[], row: BankConfigRow) {
+  const ownerValue = normalizeLookup(row.propietario_id || row.propietario);
+  const ownerAgent = agentes.find((agente) => normalizeLookup(agente.id) === ownerValue || normalizeLookup(agente.nombre) === ownerValue);
+
+  if (ownerAgent) {
+    return ownerAgent.nombre;
+  }
+
+  return String(row.propietario || row.nombre || 'Banco sin agente');
+}
+
 export default function ConfiguracionPage() {
   const { isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState<TabKey>('agentes');
@@ -96,6 +130,9 @@ export default function ConfiguracionPage() {
   const [cajaInicioMesFecha, setCajaInicioMesFecha] = useState('');
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsSubmitting, setSettingsSubmitting] = useState(false);
+  const [agentBanks, setAgentBanks] = useState<AgentBankSetting[]>([]);
+  const [agentBanksLoading, setAgentBanksLoading] = useState(true);
+  const [agentBanksSubmittingId, setAgentBanksSubmittingId] = useState<string | null>(null);
 
   const [newAgenteNombre, setNewAgenteNombre] = useState('');
   const [newAgenteUsername, setNewAgenteUsername] = useState('');
@@ -115,6 +152,15 @@ export default function ConfiguracionPage() {
   const cajaInicioMesPreviewValid = cajaInicioMesValue.trim() !== '' && Number.isFinite(cajaInicioMesPreview) && cajaInicioMesPreview >= 0;
   const cajaInicioMesFechaValid = Boolean(cajaInicioMesFecha && !Number.isNaN(new Date(`${cajaInicioMesFecha}T12:00:00`).getTime()));
   const cajaInicioMesCanSave = cajaInicioMesPreviewValid && cajaInicioMesFechaValid && !settingsSubmitting && !settingsLoading;
+  const groupedAgentBanks = agentBanks.reduce<Record<string, AgentBankSetting[]>>((acc, bank) => {
+    const groupLabel = resolveBancoAgenteNombre(agentes, bank as BankConfigRow);
+    if (!acc[groupLabel]) {
+      acc[groupLabel] = [];
+    }
+    acc[groupLabel].push(bank);
+    return acc;
+  }, {});
+  const orderedAgentBankGroups = Object.entries(groupedAgentBanks).sort(([left], [right]) => left.localeCompare(right, 'es', { sensitivity: 'base' }));
 
   const refreshAgentes = useCallback(async () => {
     const config = await getConfig();
@@ -155,6 +201,35 @@ export default function ConfiguracionPage() {
       setSettingsLoading(false);
     }
   }, []);
+
+  const loadAgentBanks = useCallback(async () => {
+    setAgentBanksLoading(true);
+    try {
+      const agentesBase = agentes.length > 0 ? agentes : await refreshAgentes();
+      const response = await getTableData('bancos');
+      const bancosFull = (response.data as BankConfigRow[]).filter((row) => isAgentOwnedBanco(agentesBase, row));
+      const bankSettings = await Promise.all(
+        bancosFull.map(async (bank) => {
+          const setting = await getCajaInicioMesBanco(bank.id);
+          return {
+            id: bank.id,
+            nombre: String(bank.nombre ?? bank.id),
+            propietario: String(bank.propietario ?? ''),
+            propietario_id: String(bank.propietario_id ?? ''),
+            value: String(setting.value ?? 0),
+            fecha_efectiva: setting.fecha_efectiva ?? '',
+          } satisfies AgentBankSetting;
+        }),
+      );
+
+      setAgentBanks(bankSettings);
+    } catch (err) {
+      setAgentBanks([]);
+      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar caja inicial por banco' });
+    } finally {
+      setAgentBanksLoading(false);
+    }
+  }, [agentes, refreshAgentes]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -199,6 +274,25 @@ export default function ConfiguracionPage() {
       alive = false;
     };
   }, [isAdmin, loadCajaInicioMes]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+
+    let alive = true;
+    void (async () => {
+      try {
+        await loadAgentBanks();
+      } catch (err) {
+        if (alive) {
+          setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar caja inicial por banco' });
+        }
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [isAdmin, loadAgentBanks]);
 
   const isDuplicateAgenteUsername = useCallback((username: string, ignoreId?: string) => {
     const needle = normalizeLookup(username);
@@ -475,6 +569,47 @@ export default function ConfiguracionPage() {
     }
   };
 
+  const handleAgentBankChange = useCallback((bankId: string, field: 'value' | 'fecha_efectiva', nextValue: string) => {
+    setAgentBanks((current) => current.map((bank) => (
+      bank.id === bankId
+        ? { ...bank, [field]: nextValue }
+        : bank
+    )));
+  }, []);
+
+  const handleAgentBankSubmit = useCallback(async (bank: AgentBankSetting) => {
+    const value = Number(bank.value);
+    const fechaEfectiva = bank.fecha_efectiva.trim();
+
+    if (!Number.isFinite(value) || value < 0) {
+      setAlert({ type: 'error', message: `El valor de ${bank.nombre} debe ser un numero mayor o igual a 0.` });
+      return;
+    }
+
+    if (!fechaEfectiva || Number.isNaN(new Date(`${fechaEfectiva}T12:00:00`).getTime())) {
+      setAlert({ type: 'error', message: `Selecciona una fecha efectiva valida para ${bank.nombre}.` });
+      return;
+    }
+
+    try {
+      setAgentBanksSubmittingId(bank.id);
+      await updateCajaInicioMesBanco(bank.id, {
+        value,
+        fecha_efectiva: fechaEfectiva,
+      });
+      setAgentBanks((current) => current.map((item) => (
+        item.id === bank.id
+          ? { ...item, value: String(value), fecha_efectiva: fechaEfectiva }
+          : item
+      )));
+      setAlert({ type: 'success', message: `Caja inicial de ${bank.nombre} actualizada correctamente` });
+    } catch (err) {
+      setAlert({ type: 'error', message: err instanceof Error ? err.message : `Error al actualizar ${bank.nombre}` });
+    } finally {
+      setAgentBanksSubmittingId(null);
+    }
+  }, []);
+
   const currentTabLabel = TABS.find((tab) => tab.id === activeTab)?.label;
 
   if (!isAdmin) {
@@ -556,6 +691,120 @@ export default function ConfiguracionPage() {
         </form>
 
         {settingsLoading && <p className="text-muted settings-loading">Cargando ajuste actual...</p>}
+      </section>
+
+      <section className="config-section card config-section--agent-banks">
+        <div className="config-section-header">
+          <div>
+            <h2 className="config-section-title">Caja inicial por banco de agente</h2>
+            <p className="page-subtitle" style={{ margin: '0.25rem 0 0' }}>
+              Configura el monto de arranque de mes para cada banco asociado a un agente.
+            </p>
+          </div>
+          <span className="badge badge-blue">{agentBanks.length} banco(s)</span>
+        </div>
+
+        {agentBanksLoading ? (
+          <div className="agent-bank-empty-state">
+            <p className="text-muted" style={{ margin: 0 }}>Cargando bancos de agente...</p>
+          </div>
+        ) : orderedAgentBankGroups.length === 0 ? (
+          <div className="agent-bank-empty-state">
+            <p className="text-muted" style={{ margin: 0 }}>No hay bancos de agente configurados.</p>
+          </div>
+        ) : (
+          <div className="agent-bank-groups">
+            {orderedAgentBankGroups.map(([groupLabel, banks]) => (
+              <article key={groupLabel} className="agent-bank-group">
+                <div className="agent-bank-group__header">
+                  <div>
+                    <h3 className="agent-bank-group__title">{groupLabel}</h3>
+                    <p className="page-subtitle" style={{ margin: '0.2rem 0 0' }}>
+                      {banks.length} banco(s) asociados
+                    </p>
+                  </div>
+                  <span className="badge badge-gold">{banks.length}</span>
+                </div>
+
+                <div className="agent-bank-group__grid">
+                  {banks
+                    .slice()
+                    .sort((left, right) => String(left.nombre).localeCompare(String(right.nombre), 'es', { sensitivity: 'base' }))
+                    .map((bank) => {
+                      const isSaving = agentBanksSubmittingId === bank.id;
+                      const valueValid = bank.value.trim() !== '' && Number.isFinite(Number(bank.value)) && Number(bank.value) >= 0;
+                      const fechaValid = Boolean(bank.fecha_efectiva && !Number.isNaN(new Date(`${bank.fecha_efectiva}T12:00:00`).getTime()));
+
+                      return (
+                        <form key={bank.id} className="agent-bank-card" onSubmit={(event) => {
+                          event.preventDefault();
+                          void handleAgentBankSubmit(bank);
+                        }}>
+                          <div className="agent-bank-card__header">
+                            <div>
+                              <h4 className="agent-bank-card__title">{bank.nombre}</h4>
+                              <p className="agent-bank-card__subtitle">
+                                Banco ID: {bank.id}
+                                {bank.propietario_id && ` · Propietario ${bank.propietario_id}`}
+                              </p>
+                            </div>
+                            {bank.fecha_efectiva ? (
+                              <span className="badge badge-blue">Vigente desde {formatDate(bank.fecha_efectiva)}</span>
+                            ) : (
+                              <span className="badge badge-gold">Sin fecha efectiva</span>
+                            )}
+                          </div>
+
+                          <div className="agent-bank-card__fields">
+                            <label className="field-group">
+                              <span className="label">Monto inicial (S/)</span>
+                              <input
+                                className="input"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                inputMode="decimal"
+                                value={bank.value}
+                                onChange={(event) => handleAgentBankChange(bank.id, 'value', event.target.value)}
+                                placeholder="0.00"
+                                required
+                                disabled={agentBanksLoading || Boolean(agentBanksSubmittingId)}
+                              />
+                            </label>
+
+                            <label className="field-group">
+                              <span className="label">Fecha efectiva</span>
+                              <input
+                                className="input"
+                                type="date"
+                                value={bank.fecha_efectiva}
+                                onChange={(event) => handleAgentBankChange(bank.id, 'fecha_efectiva', event.target.value)}
+                                required
+                                disabled={agentBanksLoading || Boolean(agentBanksSubmittingId)}
+                              />
+                            </label>
+                          </div>
+
+                          <div className="agent-bank-card__summary">
+                            <span className="settings-summary-label">Valor actual</span>
+                            <strong>{formatCurrency(valueValid ? Number(bank.value) : 0)}</strong>
+                            <span className="settings-summary-label">Fecha efectiva</span>
+                            <strong>{fechaValid ? formatDate(bank.fecha_efectiva) : 'Sin fecha válida'}</strong>
+                          </div>
+
+                          <div className="agent-bank-card__actions">
+                            <button className="btn btn-primary" type="submit" disabled={!valueValid || !fechaValid || isSaving || agentBanksLoading}>
+                              {isSaving ? 'Guardando...' : 'Guardar'}
+                            </button>
+                          </div>
+                        </form>
+                      );
+                    })}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
       </section>
 
       <div className="tabs-header">
