@@ -134,32 +134,159 @@ function appendNormalizedTime(datePart, time, meridiem) {
   return normalizedTime ? `${datePart} ${normalizedTime}` : datePart;
 }
 
-function extractFinancialData(rawText) {
-  let amount = null;
-  let date = null;
-
-  const text = rawText.replace(/\n'/g, '\n');
-  const amounts = [];
+function extractNumericValues(value) {
+  const numbers = [];
   const rawNumberRegex = /(?:\b|\s)(\d{1,3}(?:\s*[.,]\s*\d{3})*\s*[.,]\s*\d{2})(?:\b|\s)/g;
   let match;
 
-  while ((match = rawNumberRegex.exec(text)) !== null) {
+  while ((match = rawNumberRegex.exec(value)) !== null) {
     let clean = match[1].replace(/\s/g, '').replace(/,/g, '.');
     const parts = clean.split('.');
     if (parts.length > 2) {
       clean = parts.slice(0, -1).join('') + '.' + parts[parts.length - 1];
     }
-    const val = parseFloat(clean);
-    if (!Number.isNaN(val)) amounts.push(val);
+
+    const parsed = parseFloat(clean);
+    if (!Number.isNaN(parsed)) {
+      numbers.push(parsed);
+    }
   }
 
-  if (amounts.length > 0) {
-    amount = Math.max(...amounts);
+  return numbers;
+}
+
+function looksLikePersonName(line) {
+  const cleaned = String(line ?? '').trim();
+  if (!cleaned) {
+    return false;
   }
+
+  return /^[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚáéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚáéíóúñ]+){1,4}$/.test(cleaned);
+}
+
+function hasShortNoisyLine(lines, index) {
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const line = lines[cursor];
+    if (!line) {
+      continue;
+    }
+
+    return line.length <= 4 && /[^A-Za-zÁÉÍÓÚáéíóúñ0-9]/.test(line);
+  }
+
+  return false;
+}
+
+function chooseBestAmountCandidate(text) {
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const candidates = [];
+
+  lines.forEach((line, index) => {
+    const values = extractNumericValues(` ${line} `);
+    if (values.length === 0) {
+      return;
+    }
+
+    const lowerLine = line.toLowerCase();
+    const prevLine = lines[index - 1] || '';
+    const nextLine = lines[index + 1] || '';
+    const lowerPrevLine = prevLine.toLowerCase();
+
+    values.forEach((value) => {
+      let score = 0;
+
+      if (/[s$]\s*[\/.]?\s*\d/.test(lowerLine)) {
+        score += 120;
+      }
+
+      if (/\b(total|monto|importe|pagado|pago)\b/.test(lowerLine)) {
+        score += 80;
+      }
+
+      if (/^\d+[.,]\d{2}$/.test(line)) {
+        score += 40;
+      }
+
+      if (/\b(yapeaste|plin|transferiste|pagaste)\b/.test(lowerPrevLine)) {
+        score += 70;
+      }
+
+      if (looksLikePersonName(nextLine)) {
+        score += 35;
+      }
+
+      if (/\b(nro|número|numero|operaci[oó]n|celular|tel[eé]fono|cuenta)\b/.test(lowerLine)) {
+        score -= 120;
+      }
+
+      candidates.push({ value, score, line, index });
+
+      if (
+        /\byapeaste\b/.test(lowerPrevLine)
+        && looksLikePersonName(nextLine)
+        && /^1\d{2}[.,]\d{2}$/.test(line)
+        && hasShortNoisyLine(lines, index - 1)
+      ) {
+        const normalizedValue = parseFloat(line.slice(1).replace(',', '.'));
+        if (!Number.isNaN(normalizedValue)) {
+          candidates.push({
+            value: normalizedValue,
+            score: score + 15,
+            line,
+            index,
+          });
+        }
+      }
+    });
+  });
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  candidates.sort((a, b) => {
+    if (b.score !== a.score) {
+      return b.score - a.score;
+    }
+
+    if (a.index !== b.index) {
+      return a.index - b.index;
+    }
+
+    return a.value - b.value;
+  });
+
+  return candidates[0].value;
+}
+
+function cleanDateNoise(value) {
+  return String(value ?? '')
+    .split('\n')
+    .map((line) => line
+      .replace(/[●•◦○]/g, ' ')
+      .replace(/([|,\-])\s*[A-Z0-9]\s+(?=\d{1,2}:\d{2})/g, '$1 ')
+      .replace(/[ \t]+/g, ' ')
+      .trim())
+    .join('\n')
+    .trim();
+}
+
+function extractFinancialData(rawText) {
+  let amount = null;
+  let date = null;
+
+  const text = cleanDateNoise(rawText.replace(/\n'/g, '\n'));
+  amount = chooseBestAmountCandidate(text);
+
+  let match;
 
   const timePattern = '(\\d{1,2}:\\d{2})(?:\\s*([ap](?:\\.?\\s*m\\.?)?))?';
-  const dateRegexStandard = new RegExp(`(?:\\b|\\s)(\\d{2})\\s*[\\/\\-]\\s*(\\d{2})\\s*[\\/\\-]\\s*(\\d{2,4})(?:(?:\\s*-\\s*|\\s+|,\\s*)${timePattern})?(?:\\b|\\s)`, 'gi');
-  const dateRegexText = new RegExp(`(?:\\b|\\s)(\\d{1,2})\\s*(?:de\\s*)?(Ene|Feb|Mar|Abr|May|Jun|Jul|Ago|Sep|Oct|Nov|Dic|Enero|Febrero|Marzo|Abril|Mayo|Junio|Julio|Agosto|Septiembre|Octubre|Noviembre|Diciembre)\\.?\\s*(?:de\\s*)?(\\d{2,4})(?:(?:\\s*-\\s*|\\s+|,\\s*)${timePattern})?(?:\\b|\\s)`, 'gi');
+  const dateTimeSeparatorPattern = '(?:\\s*[|\\-]\\s*|\\s+|,\\s*)';
+  const dateRegexStandard = new RegExp(`(?:\\b|\\s)(\\d{2})\\s*[\\/\\-]\\s*(\\d{2})\\s*[\\/\\-]\\s*(\\d{2,4})(?:${dateTimeSeparatorPattern}${timePattern})?(?:\\b|\\s)`, 'gi');
+  const dateRegexText = new RegExp(`(?:\\b|\\s)(\\d{1,2})\\s*(?:de\\s*)?(Ene|Feb|Mar|Abr|May|Jun|Jul|Ago|Sep|Oct|Nov|Dic|Enero|Febrero|Marzo|Abril|Mayo|Junio|Julio|Agosto|Septiembre|Octubre|Noviembre|Diciembre)\\.?\\s*(?:de\\s*)?(\\d{2,4})(?:${dateTimeSeparatorPattern}${timePattern})?(?:\\b|\\s)`, 'gi');
   const dates = [];
 
   while ((match = dateRegexStandard.exec(text)) !== null) {

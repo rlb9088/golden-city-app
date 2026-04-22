@@ -139,3 +139,33 @@ test('extractFinancialData normaliza la hora escrita con p.m.', () => {
     restore();
   }
 });
+
+test('extractFinancialData reconoce comprobante Yape con separador pipe antes de la hora', () => {
+  const { service, restore } = loadServiceWithMocks();
+
+  try {
+    const result = service.extractFinancialData(
+      'Yapeaste!\nS/ 17.77\nJorge Manuel Bernal\n22 abr. 2026 | 7:58 a.m.\nNro. de operacion 1904887\nDestino Plin'
+    );
+
+    assert.equal(result.amount, 17.77);
+    assert.equal(result.date, '2026-04-22 07:58');
+  } finally {
+    restore();
+  }
+});
+
+test('extractFinancialData corrige ruido comun de Tesseract en comprobante Yape', () => {
+  const { service, restore } = loadServiceWithMocks();
+
+  try {
+    const result = service.extractFinancialData(
+      '6 E\n¡Yapeaste!\n117.77\nJorge Manuel Bernal\nE 22 abr. 2026 | O 7:58 a.m.\nDATOS DE LA TRANSACCIÓN\nNro. de celular e A 455\nDestino Plin\nNro. de operación 1904887'
+    );
+
+    assert.equal(result.amount, 17.77);
+    assert.equal(result.date, '2026-04-22 07:58');
+  } finally {
+    restore();
+  }
+});
