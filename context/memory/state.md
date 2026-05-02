@@ -1,5 +1,23 @@
 # Estado del Proyecto - Golden City Backoffice
 
+## Actualizacion: 2026-05-02 — Sprint 16 CERRADO
+
+Sprint 16 completado al 100% (T-083 → T-092). 152/152 tests passing. Commit: 28663af. Push a main → Railway + Vercel en deploy.
+
+### Resumen de cambios Sprint 16
+- **T-083/084**: `cajaDisponible` y `balanceAcumulado` con suma de gastos; frontend actualizado.
+- **T-085**: Hard delete fisico con auditoria en pagos, ingresos y gastos.
+- **T-086/087/088**: Frontend reemplaza "Anular" por "Eliminar" en los 3 modulos.
+- **T-089**: Keep-alive Railway: `GET /api/health`, `railway.json`, `HEALTHCHECK` en Dockerfile.
+- **T-090**: Retry/backoff 5 intentos (250→4000ms), warmup 30s, `BackendStatusBanner` con 3 estados.
+- **T-091/092**: Deteccion de duplicados (ventana 10min, 4 campos), modal de confirmacion, bypass `X-Confirm-Duplicate: true`.
+
+### Estado de produccion
+- Backend: Railway (desplegando tras push)
+- Frontend: Vercel (desplegando tras push)
+- Tests: 152/152 pass
+- Deuda tecnica activa: T-057 (CI/CD headers legacy), T-058 (backup procedure)
+
 ## Fecha: 2026-04-16
 
 ## Hitos Completados
