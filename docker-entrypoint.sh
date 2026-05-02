@@ -3,6 +3,14 @@ set -e
 
 echo "Golden City Backoffice - production startup"
 
+_term() {
+  echo "Caught signal, shutting down..."
+  kill -TERM "$BACKEND_PID" 2>/dev/null
+  kill -TERM "$FRONTEND_PID" 2>/dev/null
+}
+
+trap _term TERM INT
+
 cd /app/backend
 echo "Starting backend on port 3001"
 node index.js &

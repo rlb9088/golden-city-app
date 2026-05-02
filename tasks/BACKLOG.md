@@ -1,6 +1,6 @@
 # Backlog - Golden City Backoffice MVP
 
-> **Ultima actualizacion**: 2026-04-21
+> **Ultima actualizacion**: 2026-05-02 (Sprint 16 cerrado)
 
 ---
 
@@ -8,7 +8,7 @@
 
 | Total | Completados | En progreso/Parcial | Pendientes |
 |-------|-------------|---------------------|------------|
-| 82 | 57 | 0 | 25 |
+| 92 | 65 | 0 | 27 |
 
 ---
 
@@ -220,6 +220,25 @@
 | 082 | [Frontend: UI `caja_inicio_mes` por banco de agente](./TICKET-082-frontend-caja-inicio-mes-por-banco-agente.md) | 🔴 | ~2h | P1 |
 
 > **Nota Sprint 15**: Los tickets 077-080 son independientes entre sí y pueden ejecutarse en cualquier orden. El 082 depende del 081. Orden sugerido: 077 → 080 → 079 → 078 → 081 → 082.
+
+---
+
+## Sprint 16 - Ajustes de balance, eliminación y estabilidad (🔴 Pendiente)
+
+| # | Ticket | Estado | Esfuerzo | Prioridad |
+|---|--------|--------|----------|-----------|
+| 083 | [Backend: `cajaDisponible` + suma de gastos en `balanceAcumulado`](./TICKET-083-backend-caja-disponible-balance-acumulado.md) | ✅ | ~2h | P1 |
+| 084 | [Frontend: dashboard con "Caja disponible" y nuevo Balance acumulado](./TICKET-084-frontend-caja-disponible-balance-ui.md) | ✅ | ~1.5h | P1 |
+| 085 | [Backend: hard delete en Pagos, Ingresos y Gastos](./TICKET-085-backend-hard-delete-pagos-ingresos-gastos.md) | ✅ | ~3h | P1 |
+| 086 | [Frontend Pagos: reemplazar "Anular" por "Eliminar"](./TICKET-086-frontend-pagos-eliminar.md) | ✅ | ~2h | P1 |
+| 087 | [Frontend Ingresos: reemplazar "Anular" por "Eliminar"](./TICKET-087-frontend-ingresos-eliminar.md) | ✅ | ~1.5h | P1 |
+| 088 | [Frontend Gastos: reemplazar "Anular" por "Eliminar"](./TICKET-088-frontend-gastos-eliminar.md) | ✅ | ~1.5h | P1 |
+| 089 | [Backend: keep-alive y arranque rápido en Railway](./TICKET-089-backend-railway-keepalive.md) | ✅ | ~2.5h | P1 |
+| 090 | [Frontend: retry/backoff robusto y UX warmup](./TICKET-090-frontend-retry-backoff-warmup-ux.md) | ✅ | ~2h | P1 |
+| 091 | [Backend: detección de pagos duplicados al crear](./TICKET-091-backend-deteccion-pagos-duplicados.md) | ✅ | ~2.5h | P1 |
+| 092 | [Frontend: UX anti-duplicados al registrar pago](./TICKET-092-frontend-ux-pagos-duplicados.md) | ✅ | ~2.5h | P1 |
+
+> **Nota Sprint 16**: ✅ Completado (2026-05-02). Todos los tickets implementados y auditados: balance con `cajaDisponible`, hard delete con auditoría, eliminación en 3 módulos frontend, keep-alive Railway, retry/backoff con warmup UX, y detección de duplicados con modal de confirmación.
 
 ---
 

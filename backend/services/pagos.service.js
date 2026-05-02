@@ -4,9 +4,11 @@ const r2Service = require('./r2.service');
 const authService = require('./auth.service');
 const { nowLima } = require('../config/timezone');
 const { validateReferences, getConfigBancoById } = require('./config.service');
-const { BadRequestError, ForbiddenError, NotFoundError } = require('../utils/appError');
+const { BadRequestError, ForbiddenError, NotFoundError, DuplicatePagoError } = require('../utils/appError');
 const { paginateItems } = require('../utils/pagination');
 const { createPrefixedId } = require('../utils/id');
+
+const DUPLICATE_WINDOW_MINUTES = Number(process.env.DUPLICATE_WINDOW_MINUTES) || 10;
 
 const SHEET_NAME = 'pagos';
 const HEADERS = [
@@ -297,7 +299,32 @@ function sortPagosForList(pagos) {
   return [...pagos].reverse();
 }
 
-async function create(data, caller) {
+async function findDuplicateInWindow(payload, windowMinutes) {
+  const allPagos = await repo.getAll(SHEET_NAME);
+  const activePagos = allPagos.filter(isPagoActivo);
+
+  const targetMonto = Number(Number(payload.monto).toFixed(2));
+  const targetBancoId = normalizeId(payload.banco_id);
+  const targetUsuario = normalizeText(payload.usuario);
+  const targetFecha = normalizeDateOnly(payload.fecha_comprobante);
+
+  const now = Date.now();
+  const windowMs = windowMinutes * 60 * 1000;
+
+  return activePagos.find((pago) => {
+    if (Number(Number(pago.monto).toFixed(2)) !== targetMonto) return false;
+    if (normalizeId(pago.banco_id) !== targetBancoId) return false;
+    if (normalizeText(pago.usuario) !== targetUsuario) return false;
+    if (normalizeDateOnly(pago.fecha_comprobante) !== targetFecha) return false;
+
+    const fechaRegistro = new Date(pago.fecha_registro);
+    if (Number.isNaN(fechaRegistro.getTime())) return false;
+    const age = now - fechaRegistro.getTime();
+    return age >= 0 && age <= windowMs;
+  }) || null;
+}
+
+async function create(data, caller, { skipDuplicateCheck = false } = {}) {
   const warnings = await validateReferences([
     {
       tableName: 'bancos',
@@ -326,6 +353,23 @@ async function create(data, caller) {
   const bancoDetails = await assertBancoOwnership(data.banco_id, targetAgent.id, {
     allowMissingOwner: typeof caller === 'string',
   });
+
+  if (!skipDuplicateCheck) {
+    const duplicate = await findDuplicateInWindow(data, DUPLICATE_WINDOW_MINUTES);
+    if (duplicate) {
+      throw new DuplicatePagoError(
+        `Se detectó un pago con los mismos datos en los últimos ${DUPLICATE_WINDOW_MINUTES} minutos.`,
+        {
+          id: duplicate.id,
+          usuario: duplicate.usuario,
+          monto: Number(Number(duplicate.monto).toFixed(2)),
+          banco_id: duplicate.banco_id,
+          fecha_comprobante: normalizeDateOnly(duplicate.fecha_comprobante),
+          fecha_registro: duplicate.fecha_registro,
+        },
+      );
+    }
+  }
 
   const pagoId = createPrefixedId('PAG');
   const basePago = {
@@ -411,8 +455,7 @@ async function getByAgent(agente) {
 }
 
 async function getById(id) {
-  const pagos = await getAll();
-  return pagos.find((pago) => pago.id === id) || null;
+  return repo.findById(SHEET_NAME, id);
 }
 
 function buildUpdatedPago(existing, updates) {
@@ -481,9 +524,8 @@ async function update(id, updates, caller) {
   return nextRecord;
 }
 
-async function cancel(id, motivo, caller) {
-  const pagos = await getAll();
-  const existing = pagos.find((pago) => pago.id === id);
+async function remove(id, caller) {
+  const existing = await repo.findById(SHEET_NAME, id);
 
   if (!existing) {
     throw new NotFoundError('No se encontró el pago solicitado.', {
@@ -494,32 +536,16 @@ async function cancel(id, motivo, caller) {
     });
   }
 
-  if (normalizeEstado(existing.estado) === 'anulado') {
-    throw new BadRequestError('El pago ya se encuentra anulado.', {
-      context: {
-        sheet: SHEET_NAME,
-        id,
-      },
-    });
-  }
-
-  const nextRecord = {
-    ...existing,
-    estado: 'anulado',
-  };
-
-  await repo.update(SHEET_NAME, existing._rowIndex, nextRecord, HEADERS);
+  await repo.delete(SHEET_NAME, existing._rowIndex);
   await audit.log('delete', 'pago', getAuthLabel(caller), {
     before: stripInternalFields(existing),
-    after: stripInternalFields(nextRecord),
-    motivo,
   });
 
-  return nextRecord;
+  return { id };
 }
 
 function filterActiveRecords(records) {
   return records.filter(isPagoActivo);
 }
 
-module.exports = { create, getAll, getFiltered, getPagedAndFiltered, getByAgent, getById, update, cancel, filterActiveRecords };
+module.exports = { create, getAll, getFiltered, getPagedAndFiltered, getByAgent, getById, update, remove, filterActiveRecords, findDuplicateInWindow };

@@ -27,8 +27,4 @@ const pagoUpdateSchema = z.object({
   message: 'Debes enviar al menos un campo para actualizar.',
 });
 
-const pagoCancelSchema = z.object({
-  motivo: z.string().min(1, 'El motivo de anulación es requerido'),
-});
-
-module.exports = { pagoSchema, pagoUpdateSchema, pagoCancelSchema };
+module.exports = { pagoSchema, pagoUpdateSchema };

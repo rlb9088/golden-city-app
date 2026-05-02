@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/lib/auth-context';
-import { getConfig, createPago, getPagos, getScopedBancos, updatePago, cancelPago, type ConfigAgent, type ConfigBanco, type PagoRecord } from '@/lib/api';
+import { getConfig, createPago, getPagos, getScopedBancos, updatePago, deletePago, isNetworkError, DuplicatePagoError, type DuplicatePagoErrorBody, type ConfigAgent, type ConfigBanco, type PagoRecord } from '@/lib/api';
 import { formatCurrency, formatDateTime } from '@/lib/format';
 import AlertBanner from '@/components/AlertBanner';
 import PaginationControls from '@/components/PaginationControls';
@@ -47,10 +47,6 @@ function toDateTimeLocalValue(value: string) {
 function toAmountString(value: string | number | undefined) {
   const num = typeof value === 'number' ? value : parseFloat(String(value ?? ''));
   return Number.isFinite(num) ? num.toFixed(2) : '0.00';
-}
-
-function isPagoAnulado(pago: PagoRecord) {
-  return String(pago.estado ?? '').trim().toLowerCase() === 'anulado';
 }
 
 function resolveBancoValue(bancos: ConfigBanco[], bancoId?: string, bancoNombre?: string) {
@@ -122,7 +118,7 @@ export default function PagosPage() {
   const [loading, setLoading] = useState(true);
   const [pagosLoading, setPagosLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [actionLoading, setActionLoading] = useState<{ type: 'edit' | 'cancel'; id: string } | null>(null);
+  const [actionLoading, setActionLoading] = useState<{ type: 'edit' | 'delete'; id: string } | null>(null);
   const [alert, setAlert] = useState<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null);
   const [filters, setFilters] = useState<PagoFilters>({
     desde: '',
@@ -159,8 +155,18 @@ export default function PagosPage() {
     comprobante_url: '',
     fecha_comprobante: '',
   });
-  const [cancelTarget, setCancelTarget] = useState<PagoRecord | null>(null);
-  const [cancelReason, setCancelReason] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<PagoRecord | null>(null);
+  const [duplicateInfo, setDuplicateInfo] = useState<DuplicatePagoErrorBody | null>(null);
+  const [pendingDuplicatePayload, setPendingDuplicatePayload] = useState<{
+    usuario: string;
+    caja: string;
+    banco_id: string;
+    agente_id?: string;
+    monto: number;
+    tipo: string;
+    comprobante_base64: string;
+    fecha_comprobante: string;
+  } | null>(null);
 
   const firstInputRef = useRef<HTMLInputElement>(null);
   const usuarioComboboxRef = useRef<HTMLDivElement>(null);
@@ -212,7 +218,9 @@ export default function PagosPage() {
         setBanco((current) => resolveSelectedBancoId(configRes.bancos_full, current));
         setTipo((current) => current || configRes.tipos_pago[0] || '');
       } catch (err) {
-        setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar datos' });
+        if (!isNetworkError(err)) {
+          setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar datos' });
+        }
       } finally {
         setLoading(false);
         setPagosLoading(false);
@@ -257,7 +265,9 @@ export default function PagosPage() {
         }
         setScopedBancos([]);
         setBanco('');
-        setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar bancos del agente' });
+        if (!isNetworkError(err)) {
+          setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar bancos del agente' });
+        }
       }
     };
 
@@ -299,7 +309,9 @@ export default function PagosPage() {
           return;
         }
         setEditScopedBancos([]);
-        setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar bancos del pago' });
+        if (!isNetworkError(err)) {
+          setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar bancos del pago' });
+        }
       }
     };
 
@@ -376,7 +388,9 @@ export default function PagosPage() {
           setPagosLoading(true);
           await loadPagosPage(0, filters);
         } catch (err) {
-          setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al aplicar filtros de pagos' });
+          if (!isNetworkError(err)) {
+            setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al aplicar filtros de pagos' });
+          }
         } finally {
           setPagosLoading(false);
         }
@@ -387,6 +401,15 @@ export default function PagosPage() {
 
     return () => window.clearTimeout(timeoutId);
   }, [config, filters, loadPagosPage]);
+
+  const duplicateSigs = useMemo(() => {
+    const counts = new Map<string, number>();
+    pagos.forEach((p) => {
+      const sig = `${p.usuario}|${p.monto}|${p.banco_id}|${p.fecha_comprobante}`;
+      counts.set(sig, (counts.get(sig) ?? 0) + 1);
+    });
+    return counts;
+  }, [pagos]);
 
   const hasActiveFilters = Boolean(
     filters.desde || filters.hasta || filters.agente || filters.banco || filters.usuario.trim(),
@@ -421,14 +444,12 @@ export default function PagosPage() {
     setEditingPago(null);
   }, []);
 
-  const openCancelModal = useCallback((pago: PagoRecord) => {
-    setCancelTarget(pago);
-    setCancelReason('');
+  const openDeleteModal = useCallback((pago: PagoRecord) => {
+    setDeleteTarget(pago);
   }, []);
 
-  const closeCancelModal = useCallback(() => {
-    setCancelTarget(null);
-    setCancelReason('');
+  const closeDeleteModal = useCallback(() => {
+    setDeleteTarget(null);
   }, []);
 
   const refreshPagos = useCallback(async () => {
@@ -441,7 +462,7 @@ export default function PagosPage() {
     }
 
     void loadPagosPage(currentPageRef.current - 1, filters).catch((err) => {
-      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cambiar de pagina' });
+      if (!isNetworkError(err)) setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cambiar de pagina' });
     });
   }, [filters, loadPagosPage, pagination.offset, pagosLoading]);
 
@@ -451,7 +472,7 @@ export default function PagosPage() {
     }
 
     void loadPagosPage(currentPageRef.current + 1, filters).catch((err) => {
-      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cambiar de pagina' });
+      if (!isNetworkError(err)) setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cambiar de pagina' });
     });
   }, [filters, loadPagosPage, pagination.hasMore, pagosLoading]);
 
@@ -493,27 +514,22 @@ export default function PagosPage() {
     }
   }, [closeEditModal, editForm, editScopedBancos, editingPago, refreshPagos]);
 
-  const handleCancelPago = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!cancelTarget) return;
-
-    if (!cancelReason.trim()) {
-      setAlert({ type: 'error', message: 'Escribe un motivo para anular el pago' });
-      return;
-    }
+  const handleDeletePago = useCallback(async () => {
+    if (!deleteTarget) return;
 
     try {
-      setActionLoading({ type: 'cancel', id: cancelTarget.id });
-      await cancelPago(cancelTarget.id, cancelReason.trim());
-      setAlert({ type: 'success', message: 'Pago anulado correctamente' });
-      closeCancelModal();
-      await refreshPagos();
+      setActionLoading({ type: 'delete', id: deleteTarget.id });
+      await deletePago(deleteTarget.id);
+      setPagos((prev) => prev.filter((p) => p.id !== deleteTarget.id));
+      setTotalPagos((prev) => Math.max(prev - 1, 0));
+      setAlert({ type: 'success', message: 'Pago eliminado correctamente.' });
+      closeDeleteModal();
     } catch (err) {
-      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al anular pago' });
+      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al eliminar pago' });
     } finally {
       setActionLoading(null);
     }
-  }, [cancelReason, cancelTarget, closeCancelModal, refreshPagos]);
+  }, [deleteTarget, closeDeleteModal]);
 
   const validateUsuario = useCallback((value: string) => {
     if (!config) return;
@@ -610,6 +626,22 @@ export default function PagosPage() {
     }
   }, [ocrFecha]);
 
+  const resetFormAfterSubmit = useCallback(() => {
+    setUsuario('');
+    setMonto('');
+    setOcrMonto(null);
+    setOcrFecha(null);
+    setOcrWarning(null);
+    setFechaWarning(null);
+    setUsuarioWarning(null);
+    setComprobanteBase64('');
+    setFechaComprobante('');
+    setReceiptResetToken((current) => current + 1);
+    firstInputRef.current?.focus();
+    currentPageRef.current = 0;
+    setPagination((current) => ({ ...current, offset: 0 }));
+  }, []);
+
   const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     const resolvedBancoId = resolveSelectedBancoId(scopedBancos, banco);
@@ -620,18 +652,20 @@ export default function PagosPage() {
       return;
     }
 
+    const payload = {
+      usuario: usuario.trim(),
+      caja,
+      banco_id: resolvedBancoId,
+      agente_id: isAdmin ? selectedPagoAgentId : undefined,
+      monto: parsedAmount,
+      tipo,
+      comprobante_base64: comprobanteBase64,
+      fecha_comprobante: fechaComprobante,
+    };
+
     try {
       setSubmitting(true);
-      const response = await createPago({
-        usuario: usuario.trim(),
-        caja,
-        banco_id: resolvedBancoId,
-        agente_id: isAdmin ? selectedPagoAgentId : undefined,
-        monto: parsedAmount,
-        tipo,
-        comprobante_base64: comprobanteBase64,
-        fecha_comprobante: fechaComprobante,
-      });
+      const response = await createPago(payload);
       const warningMessage = response.warnings?.length
         ? `Pago registrado con observaciones: ${response.warnings.join(' • ')}`
         : '';
@@ -640,26 +674,53 @@ export default function PagosPage() {
           ? { type: 'warning', message: warningMessage }
           : { type: 'success', message: `Pago de ${formatCurrency(parsedAmount)} registrado` },
       );
-      setUsuario('');
-      setMonto('');
-      setOcrMonto(null);
-      setOcrFecha(null);
-      setOcrWarning(null);
-      setFechaWarning(null);
-      setUsuarioWarning(null);
-      setComprobanteBase64('');
-      setFechaComprobante('');
-      setReceiptResetToken((current) => current + 1);
-      firstInputRef.current?.focus();
-      currentPageRef.current = 0;
-      setPagination((current) => ({ ...current, offset: 0 }));
+      resetFormAfterSubmit();
       await refreshPagos();
     } catch (err) {
+      if (err instanceof DuplicatePagoError) {
+        setDuplicateInfo(err.body);
+        setPendingDuplicatePayload(payload);
+        return;
+      }
       setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al registrar pago' });
     } finally {
       setSubmitting(false);
     }
-  }, [banco, caja, comprobanteBase64, fechaComprobante, isAdmin, monto, refreshPagos, scopedBancos, selectedPagoAgentId, tipo, usuario]);
+  }, [banco, caja, comprobanteBase64, fechaComprobante, isAdmin, monto, refreshPagos, resetFormAfterSubmit, scopedBancos, selectedPagoAgentId, tipo, usuario]);
+
+  const handleConfirmDuplicate = useCallback(async () => {
+    if (!pendingDuplicatePayload) return;
+    try {
+      setSubmitting(true);
+      const response = await createPago(pendingDuplicatePayload, { confirmDuplicate: true });
+      const extra = response.warnings?.length ? ` ${response.warnings.join(' • ')}` : '';
+      setDuplicateInfo(null);
+      setPendingDuplicatePayload(null);
+      setAlert({ type: 'warning', message: `Pago registrado a pesar de la alerta de duplicado.${extra}` });
+      resetFormAfterSubmit();
+      await refreshPagos();
+    } catch (err) {
+      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al registrar pago' });
+      setDuplicateInfo(null);
+      setPendingDuplicatePayload(null);
+    } finally {
+      setSubmitting(false);
+    }
+  }, [pendingDuplicatePayload, refreshPagos, resetFormAfterSubmit]);
+
+  const handleCancelDuplicate = useCallback(() => {
+    setDuplicateInfo(null);
+    setPendingDuplicatePayload(null);
+  }, []);
+
+  useEffect(() => {
+    if (!duplicateInfo) return undefined;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleCancelDuplicate();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [duplicateInfo, handleCancelDuplicate]);
 
   const handleOCR = (data: { monto: number | null; fecha: string | null; comprobanteBase64: string }) => {
     setComprobanteBase64(data.comprobanteBase64);
@@ -1050,14 +1111,16 @@ export default function PagosPage() {
                   <th>Agente</th>
                   <th>Banco</th>
                   <th>Tipo</th>
-                  <th>Estado</th>
                   <th style={{ textAlign: 'right' }}>Monto</th>
                   {isAdmin && <th style={{ textAlign: 'right' }}>Acciones</th>}
                 </tr>
               </thead>
               <tbody>
-                {pagos.map((p, i) => (
-                  <tr key={p.id || i} className={isPagoAnulado(p) ? 'pago-row pago-row--anulado' : 'pago-row'}>
+                {pagos.map((p, i) => {
+                  const sig = `${p.usuario}|${p.monto}|${p.banco_id}|${p.fecha_comprobante}`;
+                  const isPosibleDuplicado = (duplicateSigs.get(sig) ?? 0) > 1;
+                  return (
+                  <tr key={p.id || i} className="pago-row">
                     <td>
                       {p.comprobante_url ? (
                         <a href={p.comprobante_url} target="_blank" rel="noreferrer" className="link">
@@ -1071,17 +1134,23 @@ export default function PagosPage() {
                     <td style={{ color: p.fecha_comprobante ? 'var(--accent-gold)' : 'inherit' }}>
                       {p.fecha_comprobante ? p.fecha_comprobante : <span className="text-muted">-</span>}
                     </td>
-                    <td><strong>{p.usuario}</strong></td>
+                    <td>
+                      <strong>{p.usuario}</strong>
+                      {isPosibleDuplicado && (
+                        <span
+                          className="badge"
+                          style={{ marginLeft: '6px', background: '#7c5a00', color: '#ffd966', fontSize: '0.7rem', cursor: 'help' }}
+                          title="Existen otros pagos con la misma combinación de usuario, monto, banco y fecha. Verifica si alguno debe eliminarse."
+                        >
+                          posible duplicado
+                        </span>
+                      )}
+                    </td>
                     <td>{p.agente}</td>
                     <td><span className="badge badge-blue">{p.banco}</span></td>
                     <td>{p.tipo}</td>
-                    <td>
-                      <span className={`badge ${isPagoAnulado(p) ? 'badge-red' : 'badge-green'}`}>
-                        {isPagoAnulado(p) ? 'Anulado' : 'Activo'}
-                      </span>
-                    </td>
                     <td className="text-right">
-                      <span className={`amount ${isPagoAnulado(p) ? 'amount-muted' : 'amount-negative'}`}>
+                      <span className="amount amount-negative">
                         {formatCurrency(p.monto)}
                       </span>
                     </td>
@@ -1096,23 +1165,20 @@ export default function PagosPage() {
                           >
                             Editar
                           </button>
-                          {!isPagoAnulado(p) ? (
-                            <button
-                              type="button"
-                              className="btn btn-danger btn-sm"
-                              onClick={() => openCancelModal(p)}
-                              disabled={Boolean(actionLoading)}
-                            >
-                              Anular
-                            </button>
-                          ) : (
-                            <span className="text-muted">Sin acciones</span>
-                          )}
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            onClick={() => openDeleteModal(p)}
+                            disabled={Boolean(actionLoading)}
+                          >
+                            Eliminar
+                          </button>
                         </div>
                       </td>
                     )}
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1258,64 +1324,118 @@ export default function PagosPage() {
         </div>
       )}
 
-      {isAdmin && cancelTarget && (
-        <div className="modal-overlay" role="presentation" onClick={closeCancelModal}>
-          <div className="modal-card card" role="dialog" aria-modal="true" aria-labelledby="cancel-pago-title" onClick={(event) => event.stopPropagation()}>
+      {isAdmin && deleteTarget && (
+        <div className="modal-overlay" role="presentation" onClick={closeDeleteModal}>
+          <div className="modal-card card" role="dialog" aria-modal="true" aria-labelledby="delete-pago-title" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <div>
-                <h3 id="cancel-pago-title" className="balance-section-title" style={{ marginBottom: '4px', fontSize: '1rem' }}>
-                  Anular pago
+                <h3 id="delete-pago-title" className="balance-section-title" style={{ marginBottom: '4px', fontSize: '1rem' }}>
+                  Eliminar pago
                 </h3>
-                <p className="page-subtitle" style={{ margin: 0 }}>
-                  El registro no se borrará. Solo cambiará su estado a anulado.
-                </p>
               </div>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={closeCancelModal}>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={closeDeleteModal}>
                 Cerrar
               </button>
             </div>
 
-            <form className="modal-form" onSubmit={handleCancelPago}>
-              <div className="modal-summary">
-                <div>
-                  <strong>{cancelTarget.usuario}</strong>
-                  <p className="page-subtitle" style={{ margin: '4px 0 0' }}>
-                    {cancelTarget.banco} · {formatCurrency(cancelTarget.monto)}
-                  </p>
-                </div>
-                <span className="badge badge-red">Anulación administrativa</span>
-              </div>
-
-              <label className="field-group">
-                <span className="label">Motivo de anulación</span>
-                <textarea
-                  className="input modal-textarea"
-                  value={cancelReason}
-                  onChange={(e) => setCancelReason(e.target.value)}
-                  placeholder="Describe por qué se anula este pago"
-                  rows={4}
-                  required
-                />
-              </label>
+            <div className="modal-form">
+              <p style={{ margin: '0 0 1.5rem' }}>
+                ¿Eliminar este pago? Esta acción no se puede deshacer.
+              </p>
 
               <div className="modal-actions">
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={closeCancelModal}
+                  onClick={closeDeleteModal}
                   disabled={Boolean(actionLoading)}
                 >
-                  Volver
+                  Cancelar
                 </button>
                 <button
-                  type="submit"
+                  type="button"
                   className="btn btn-danger"
+                  onClick={() => void handleDeletePago()}
                   disabled={Boolean(actionLoading)}
                 >
-                  {actionLoading?.type === 'cancel' && actionLoading.id === cancelTarget.id ? 'Anulando...' : 'Confirmar anulación'}
+                  {actionLoading?.type === 'delete' && actionLoading.id === deleteTarget.id ? 'Eliminando...' : 'Eliminar'}
                 </button>
               </div>
-            </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {duplicateInfo && (
+        <div className="modal-overlay" role="presentation" onClick={handleCancelDuplicate}>
+          <div
+            className="modal-card card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="duplicate-pago-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div>
+                <h3 id="duplicate-pago-title" className="balance-section-title" style={{ marginBottom: '4px', fontSize: '1rem' }}>
+                  ⚠️ Posible pago duplicado
+                </h3>
+                <p className="page-subtitle" style={{ margin: 0 }}>
+                  Detectamos un pago con los mismos datos ya registrado.
+                </p>
+              </div>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={handleCancelDuplicate}>
+                Cerrar
+              </button>
+            </div>
+
+            <div className="modal-form">
+              <p style={{ margin: 0 }}>
+                Registrado el{' '}
+                <strong>{formatDateTime(duplicateInfo.existing.fecha_registro)}</strong>
+                {' '}(id: <code>{duplicateInfo.existing.id}</code>).
+              </p>
+
+              <div className="modal-summary">
+                <div>
+                  <div className="text-muted" style={{ fontSize: '0.8rem', marginBottom: '4px' }}>Usuario</div>
+                  <strong>{duplicateInfo.existing.usuario}</strong>
+                </div>
+                <div>
+                  <div className="text-muted" style={{ fontSize: '0.8rem', marginBottom: '4px' }}>Monto</div>
+                  <strong>{formatCurrency(duplicateInfo.existing.monto)}</strong>
+                </div>
+                <div>
+                  <div className="text-muted" style={{ fontSize: '0.8rem', marginBottom: '4px' }}>Banco</div>
+                  <strong>{duplicateInfo.existing.banco_id}</strong>
+                </div>
+                <div>
+                  <div className="text-muted" style={{ fontSize: '0.8rem', marginBottom: '4px' }}>Fecha comprobante</div>
+                  <strong>{duplicateInfo.existing.fecha_comprobante || '—'}</strong>
+                </div>
+              </div>
+
+              <div className="modal-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleCancelDuplicate}
+                  disabled={submitting}
+                  aria-label="Cancelar registro del pago"
+                >
+                  Cancelar registro
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={() => void handleConfirmDuplicate()}
+                  disabled={submitting}
+                  aria-label="Registrar el pago de todas formas"
+                >
+                  {submitting ? 'Registrando...' : 'Registrar de todas formas'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

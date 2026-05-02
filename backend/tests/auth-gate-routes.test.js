@@ -33,14 +33,27 @@ test('los GET de movimientos y balance requieren verifyToken + requireAuth', () 
   const balanceRouter = require('../routes/balance.routes');
 
   assert.deepStrictEqual(getRouteStack(pagosRouter, 'get', '/'), ['verifyToken', 'requireAuth', 'getAll']);
+  assert.deepStrictEqual(getRouteStack(pagosRouter, 'get', '/:id'), ['verifyToken', 'requireAuth', 'getById']);
   assert.deepStrictEqual(getRouteStack(ingresosRouter, 'get', '/'), ['verifyToken', 'requireAuth', 'getPagedAndFiltered']);
+  assert.deepStrictEqual(getRouteStack(ingresosRouter, 'get', '/:id'), ['verifyToken', 'requireAuth', 'getById']);
   assert.deepStrictEqual(getRouteStack(gastosRouter, 'get', '/'), ['verifyToken', 'requireAuth', 'getPagedAndFiltered']);
+  assert.deepStrictEqual(getRouteStack(gastosRouter, 'get', '/:id'), ['verifyToken', 'requireAuth', 'getById']);
   assert.deepStrictEqual(getRouteStack(bancosRouter, 'get', '/scoped'), ['verifyToken', 'requireAuth', 'getScoped']);
   assert.deepStrictEqual(getRouteStack(bancosRouter, 'get', '/'), ['verifyToken', 'requireAuth', 'getPagedAndFiltered']);
   assert.deepStrictEqual(getRouteStack(balanceRouter, 'get', '/'), ['verifyToken', 'requireAuth', 'validateQueryMiddleware', 'getGlobal']);
   assert.deepStrictEqual(getRouteStack(balanceRouter, 'get', '/mi-caja'), ['verifyToken', 'requireAuth', 'validateQueryMiddleware', 'getMiCaja']);
   assert.deepStrictEqual(getRouteStack(balanceRouter, 'get', '/:agente'), ['verifyToken', 'requireAuth', 'getByAgent']);
   assert.ok(getRouteIndex(balanceRouter, 'get', '/mi-caja') < getRouteIndex(balanceRouter, 'get', '/:agente'));
+});
+
+test('los DELETE de movimientos requieren admin y no validan body', () => {
+  const pagosRouter = require('../routes/pagos.routes');
+  const ingresosRouter = require('../routes/ingresos.routes');
+  const gastosRouter = require('../routes/gastos.routes');
+
+  assert.deepStrictEqual(getRouteStack(pagosRouter, 'delete', '/:id'), ['verifyToken', 'requireAdmin', 'remove']);
+  assert.deepStrictEqual(getRouteStack(ingresosRouter, 'delete', '/:id'), ['verifyToken', 'requireAdmin', 'remove']);
+  assert.deepStrictEqual(getRouteStack(gastosRouter, 'delete', '/:id'), ['verifyToken', 'requireAdmin', 'remove']);
 });
 
 test('config mantiene el listado general publico y protege las tablas', () => {

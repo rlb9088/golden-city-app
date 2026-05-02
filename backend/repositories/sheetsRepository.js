@@ -789,4 +789,18 @@ async function findByColumn(sheetName, column, value) {
   return all.filter((row) => row[column] === value);
 }
 
-module.exports = { getAll, append, appendBatch, update, deleteRow, findByColumn };
+async function findById(sheetName, id) {
+  const all = await getAll(sheetName);
+  return all.find((row) => row.id === id) || null;
+}
+
+module.exports = {
+  getAll,
+  append,
+  appendBatch,
+  update,
+  deleteRow,
+  delete: deleteRow,
+  findByColumn,
+  findById,
+};

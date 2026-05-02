@@ -1,20 +1,3 @@
-.mov-row--anulado {
-  opacity: 0.68;
-}
-
-.mov-row--anulado td {
-  color: var(--text-muted);
-}
-
-.mov-row--anulado td strong {
-  text-decoration: line-through;
-  text-decoration-thickness: 1px;
-}
-
-.amount-muted {
-  color: var(--text-muted);
-}
-
 .row-actions {
   display: inline-flex;
   align-items: center;

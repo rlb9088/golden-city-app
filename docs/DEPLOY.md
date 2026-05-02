@@ -29,6 +29,7 @@ Backend:
 - `CORS_ORIGIN`
 - `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `R2_PUBLIC_URL` (required for receipt persistence)
 - `LOG_DIR` optional. Defaults to `backend/logs`
+- `DUPLICATE_WINDOW_MINUTES` optional. Minutes within which a second identical pago (same usuario, monto, banco_id, fecha_comprobante) is rejected as a duplicate. Defaults to `10`. Set to `0` to disable window-based deduplication.
 
 > `GOOGLE_APPLICATION_CREDENTIALS` is no longer read by the backend. Mounting a JSON file is supported only as a developer convenience: encode it to base64 and pass it via `GOOGLE_CREDENTIALS_BASE64`.
 
@@ -100,6 +101,10 @@ La opción recomendada para este proyecto. El frontend Next.js se despliega en V
 ### Pre-requisito
 
 **Ejecutar TICKET-055 antes de cualquier deploy**: los scripts de migración (`migrateAuthUsersToAgentes.js` y `migrateBancoId.js`) deben correr en modo `--dry-run` + `--commit` contra la hoja de producción antes de subir el backend.
+
+### Healthcheck
+
+Railway detecta que el contenedor está listo usando `GET /api/health`. Esto está declarado en `railway.json` (`healthcheckPath=/api/health`, timeout 30 s). El mismo endpoint se usa como `HEALTHCHECK` de Docker y como objetivo del cron de keep-alive (ver [docs/keep-alive.md](keep-alive.md)).
 
 ### Paso 1 — Backend en Railway
 

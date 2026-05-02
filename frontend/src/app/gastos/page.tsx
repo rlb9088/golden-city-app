@@ -1,17 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useState, useRef } from 'react';
-import { getConfig, createGasto, getGastos, getScopedBancos, updateGasto, cancelGasto, type ConfigBanco, type GastoRecord } from '@/lib/api';
+import { getConfig, createGasto, getGastos, getScopedBancos, updateGasto, deleteGasto, isNetworkError, type ConfigBanco, type GastoRecord } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { formatCurrency, formatDate, getTodayLima } from '@/lib/format';
 import AlertBanner from '@/components/AlertBanner';
 import PaginationControls from '@/components/PaginationControls';
 import TableSkeleton from '@/components/TableSkeleton';
 import './gastos.css';
-
-function isAnulado(record: GastoRecord) {
-  return String(record.estado ?? '').trim().toLowerCase() === 'anulado';
-}
 
 const PAGE_SIZE = 50;
 
@@ -23,7 +19,7 @@ export default function GastosPage() {
   const [pagination, setPagination] = useState({ limit: PAGE_SIZE, offset: 0, total: 0, hasMore: false });
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [actionLoading, setActionLoading] = useState<{ type: 'edit' | 'cancel'; id: string } | null>(null);
+  const [actionLoading, setActionLoading] = useState<{ type: 'edit' | 'delete'; id: string } | null>(null);
   const [alert, setAlert] = useState<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null);
 
   const [concepto, setConcepto] = useState('');
@@ -41,8 +37,7 @@ export default function GastosPage() {
     monto: '',
     fecha_gasto: '',
   });
-  const [cancelTarget, setCancelTarget] = useState<GastoRecord | null>(null);
-  const [cancelReason, setCancelReason] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<GastoRecord | null>(null);
   const conceptoRef = useRef<HTMLInputElement>(null);
   const currentPageRef = useRef(0);
 
@@ -75,14 +70,12 @@ export default function GastosPage() {
     setEditingGasto(null);
   }, []);
 
-  const openCancelModal = useCallback((gasto: GastoRecord) => {
-    setCancelTarget(gasto);
-    setCancelReason('');
+  const openDeleteModal = useCallback((gasto: GastoRecord) => {
+    setDeleteTarget(gasto);
   }, []);
 
-  const closeCancelModal = useCallback(() => {
-    setCancelTarget(null);
-    setCancelReason('');
+  const closeDeleteModal = useCallback(() => {
+    setDeleteTarget(null);
   }, []);
 
   const handleUpdateGasto = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
@@ -115,27 +108,21 @@ export default function GastosPage() {
     }
   }, [closeEditModal, editForm, editingGasto, refreshGastos]);
 
-  const handleCancelGasto = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!cancelTarget) return;
-
-    if (!cancelReason.trim()) {
-      setAlert({ type: 'error', message: 'Escribe un motivo para anular el gasto' });
-      return;
-    }
+  const handleDeleteGasto = useCallback(async () => {
+    if (!deleteTarget) return;
 
     try {
-      setActionLoading({ type: 'cancel', id: cancelTarget.id });
-      await cancelGasto(cancelTarget.id, cancelReason.trim());
-      setAlert({ type: 'success', message: 'Gasto anulado correctamente' });
-      closeCancelModal();
-      await refreshGastos();
+      setActionLoading({ type: 'delete', id: deleteTarget.id });
+      await deleteGasto(deleteTarget.id);
+      setGastos((prev) => prev.filter((g) => g.id !== deleteTarget.id));
+      setAlert({ type: 'success', message: 'Gasto eliminado correctamente.' });
+      closeDeleteModal();
     } catch (err) {
-      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al anular gasto' });
+      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al eliminar gasto' });
     } finally {
       setActionLoading(null);
     }
-  }, [cancelReason, cancelTarget, closeCancelModal, refreshGastos]);
+  }, [deleteTarget, closeDeleteModal]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -151,7 +138,9 @@ export default function GastosPage() {
         setScopedBancos(scopedResponse.data);
         setBanco(scopedResponse.data[0]?.id || '');
       } catch (err) {
-        setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar datos' });
+        if (!isNetworkError(err)) {
+          setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar datos' });
+        }
       } finally {
         setLoading(false);
       }
@@ -166,7 +155,7 @@ export default function GastosPage() {
     }
 
     void loadGastosPage(currentPageRef.current - 1).catch((err) => {
-      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cambiar de pagina' });
+      if (!isNetworkError(err)) setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cambiar de pagina' });
     });
   }, [loadGastosPage, loading, pagination.offset]);
 
@@ -176,7 +165,7 @@ export default function GastosPage() {
     }
 
     void loadGastosPage(currentPageRef.current + 1).catch((err) => {
-      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cambiar de pagina' });
+      if (!isNetworkError(err)) setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cambiar de pagina' });
     });
   }, [loadGastosPage, loading, pagination.hasMore]);
 
@@ -322,25 +311,20 @@ export default function GastosPage() {
         ) : (
           <div className="table-container">
             <table className="table" id="gastos-table">
-              <thead><tr><th>Fecha Gasto</th><th>Concepto</th><th>Categoría</th><th>Banco</th><th>Estado</th><th style={{textAlign:'right'}}>Monto</th>{isAdmin && <th style={{textAlign:'right'}}>Acciones</th>}</tr></thead>
+              <thead><tr><th>Fecha Gasto</th><th>Concepto</th><th>Categoría</th><th>Banco</th><th style={{textAlign:'right'}}>Monto</th>{isAdmin && <th style={{textAlign:'right'}}>Acciones</th>}</tr></thead>
               <tbody>
                 {gastos.map((g, idx) => (
-                  <tr key={g.id || idx} className={isAnulado(g) ? 'mov-row mov-row--anulado' : 'mov-row'}>
+                  <tr key={g.id || idx} className="mov-row">
                     <td><strong>{formatDate(g.fecha_gasto)}</strong></td>
                     <td><strong>{g.concepto}</strong></td>
                     <td><span className="badge badge-gold">{g.categoria}</span> {g.subcategoria && <span className="text-muted">/ {g.subcategoria}</span>}</td>
                     <td><span className="badge badge-blue">{g.banco}</span></td>
-                    <td><span className={`badge ${isAnulado(g) ? 'badge-red' : 'badge-green'}`}>{isAnulado(g) ? 'Anulado' : 'Activo'}</span></td>
-                    <td className="text-right"><span className={`amount ${isAnulado(g) ? 'amount-muted' : 'amount-negative'}`}>{formatCurrency(g.monto)}</span></td>
+                    <td className="text-right"><span className="amount amount-negative">{formatCurrency(g.monto)}</span></td>
                     {isAdmin && (
                       <td className="text-right">
                         <div className="row-actions">
                           <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEditModal(g)} disabled={Boolean(actionLoading)}>Editar</button>
-                          {!isAnulado(g) ? (
-                            <button type="button" className="btn btn-danger btn-sm" onClick={() => openCancelModal(g)} disabled={Boolean(actionLoading)}>Anular</button>
-                          ) : (
-                            <span className="text-muted">Sin acciones</span>
-                          )}
+                          <button type="button" className="btn btn-danger btn-sm" onClick={() => openDeleteModal(g)} disabled={Boolean(actionLoading)}>Eliminar</button>
                         </div>
                       </td>
                     )}
@@ -426,36 +410,30 @@ export default function GastosPage() {
         </div>
       )}
 
-      {isAdmin && cancelTarget && (
-        <div className="modal-overlay" role="presentation" onClick={closeCancelModal}>
-          <div className="modal-card card" role="dialog" aria-modal="true" aria-labelledby="cancel-gasto-title" onClick={(event) => event.stopPropagation()}>
+      {isAdmin && deleteTarget && (
+        <div className="modal-overlay" role="presentation" onClick={closeDeleteModal}>
+          <div className="modal-card card" role="dialog" aria-modal="true" aria-labelledby="delete-gasto-title" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <div>
-                <h3 id="cancel-gasto-title" className="balance-section-title" style={{ marginBottom: '4px', fontSize: '1rem' }}>Anular gasto</h3>
-                <p className="page-subtitle" style={{ margin: 0 }}>El registro no se borrará. Solo cambiará su estado a anulado.</p>
+                <h3 id="delete-gasto-title" className="balance-section-title" style={{ marginBottom: '4px', fontSize: '1rem' }}>Eliminar gasto</h3>
+                <p className="page-subtitle" style={{ margin: 0 }}>¿Eliminar este gasto? Esta acción no se puede deshacer.</p>
               </div>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={closeCancelModal}>Cerrar</button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={closeDeleteModal}>Cerrar</button>
             </div>
-
-            <form className="modal-form" onSubmit={handleCancelGasto}>
+            <div className="modal-form">
               <div className="modal-summary">
                 <div>
-                  <strong>{cancelTarget.concepto}</strong>
-                  <p className="page-subtitle" style={{ margin: '4px 0 0' }}>{cancelTarget.categoria} · {formatCurrency(cancelTarget.monto)}</p>
+                  <strong>{deleteTarget.concepto}</strong>
+                  <p className="page-subtitle" style={{ margin: '4px 0 0' }}>{deleteTarget.categoria} · {formatCurrency(deleteTarget.monto)}</p>
                 </div>
-                <span className="badge badge-red">Anulación administrativa</span>
               </div>
-              <label className="field-group">
-                <span className="label">Motivo de anulación</span>
-                <textarea className="input modal-textarea" value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="Describe por qué se anula este gasto" rows={4} required />
-              </label>
               <div className="modal-actions">
-                <button type="button" className="btn btn-secondary" onClick={closeCancelModal} disabled={Boolean(actionLoading)}>Volver</button>
-                <button type="submit" className="btn btn-danger" disabled={Boolean(actionLoading)}>
-                  {actionLoading?.type === 'cancel' && actionLoading.id === cancelTarget.id ? 'Anulando...' : 'Confirmar anulación'}
+                <button type="button" className="btn btn-secondary" onClick={closeDeleteModal} disabled={Boolean(actionLoading)}>Cancelar</button>
+                <button type="button" className="btn btn-danger" onClick={() => void handleDeleteGasto()} disabled={Boolean(actionLoading)}>
+                  {actionLoading?.type === 'delete' && actionLoading.id === deleteTarget.id ? 'Eliminando...' : 'Eliminar'}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}

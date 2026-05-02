@@ -18,8 +18,4 @@ const ingresoUpdateSchema = z.object({
   message: 'Debes enviar al menos un campo para actualizar.',
 });
 
-const ingresoCancelSchema = z.object({
-  motivo: z.string().min(1, 'El motivo de anulación es requerido'),
-});
-
-module.exports = { ingresoSchema, ingresoUpdateSchema, ingresoCancelSchema };
+module.exports = { ingresoSchema, ingresoUpdateSchema };

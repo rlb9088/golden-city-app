@@ -1,4 +1,5 @@
 const ingresosService = require('../services/ingresos.service');
+const { NotFoundError } = require('../utils/appError');
 
 async function create(req, res) {
   const { record, warnings } = await ingresosService.create(req.validatedData, req.auth);
@@ -25,22 +26,35 @@ async function getPagedAndFiltered(req, res) {
   res.json({ status: 'success', data: ingresos });
 }
 
+async function getById(req, res) {
+  const { id } = req.params;
+  const ingreso = await ingresosService.getById(id);
+
+  if (!ingreso) {
+    throw new NotFoundError('No se encontró el ingreso solicitado.', {
+      context: { id },
+    });
+  }
+
+  res.json({ status: 'success', data: ingreso });
+}
+
 async function update(req, res) {
   const { id } = req.params;
   const ingreso = await ingresosService.update(id, req.validatedData, req.auth);
   res.json({ status: 'success', data: ingreso });
 }
 
-async function cancel(req, res) {
+async function remove(req, res) {
   const { id } = req.params;
-  const { motivo } = req.validatedData;
-  const ingreso = await ingresosService.cancel(id, motivo, req.auth);
+  const ingreso = await ingresosService.remove(id, req.auth);
   res.json({ status: 'success', data: ingreso });
 }
 
 module.exports = {
   create,
   getPagedAndFiltered,
+  getById,
   update,
-  cancel,
+  remove,
 };

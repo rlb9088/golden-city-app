@@ -127,13 +127,12 @@ Los "usuarios" dentro del contexto de pagos son los **jugadores** que reciben di
 BancosAdmin(D) = suma de saldos de bancos admin al cierre de D
 CajasAgentes(D) = suma(ingresos <= D) - suma(pagos <= D)
 TotalGastos(D) = suma(gastos activos <= D)
-GastosDelDia(D) = suma(gastos activos en D)
-BalanceDelDia(D) = (BancosAdmin(D) + CajasAgentes(D)) - (BancosAdmin(D-1) + CajasAgentes(D-1)) - GastosDelDia(D)
-BalanceAcumulado(D) = (BancosAdmin(D) + CajasAgentes(D)) - TotalGastos(D) - caja_inicio_mes
+CajaDisponible(D) = BancosAdmin(D) + CajasAgentes(D) - caja_inicio_mes
+BalanceAcumulado(D) = BancosAdmin(D) + CajasAgentes(D) + TotalGastos(D) - caja_inicio_mes
 ```
 
 **Vistas**:
-- 5 cards de resumen: Bancos admin, Cajas de agentes, Total gastos, Balance del día, Balance acumulado.
+- 5 cards de resumen: Bancos admin, Cajas de agentes, Total gastos, Caja disponible, Balance acumulado.
 - Tabla: Balance por agente con sus bancos desglosados.
 - Tabla: Balance por banco admin.
 - Tabla: Balance por categoría y subcategoría de gasto.
@@ -309,7 +308,7 @@ Admin abre /ingresos
 - Almacenamiento permanente de imágenes de comprobantes
 - Paginación de tablas
 - Filtros y búsqueda avanzada en listas
-- Edición/anulación de registros existentes
+- Edición/eliminación de registros existentes
 - Cierre de caja formal (cuadre de agente)
 
 ---
@@ -333,5 +332,5 @@ Admin abre /ingresos
 3. **Cierre de caja** — Proceso formal de cuadre por agente/día
 4. **Reportes** — Exportación a Excel por rango de fechas
 5. **Almacenamiento de comprobantes** — Google Drive o Cloud Storage
-6. **Edición y anulación** — Con registro de auditoría del cambio
+6. **Edición y eliminación** — Con registro de auditoría del cambio y snapshot previo en borrados
 7. **Conciliación** — Cruce automático entre pagos registrados y movimientos bancarios

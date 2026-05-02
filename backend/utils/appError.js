@@ -54,6 +54,13 @@ class ValidationError extends AppError {
   }
 }
 
+class DuplicatePagoError extends AppError {
+  constructor(message, existing, options = {}) {
+    super(message, 409, { code: 'DUPLICATE_PAGO', ...options });
+    this.existing = existing;
+  }
+}
+
 module.exports = {
   AppError,
   BadRequestError,
@@ -63,4 +70,5 @@ module.exports = {
   RateLimitError,
   ExternalServiceError,
   ValidationError,
+  DuplicatePagoError,
 };

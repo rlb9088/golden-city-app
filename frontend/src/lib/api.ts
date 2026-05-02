@@ -1,8 +1,11 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
-const DEFAULT_TIMEOUT_MS = 10_000;
-const RETRY_DELAY_MS = 250;
+const DEFAULT_TIMEOUT_MS = 15_000;
+const WARMUP_TIMEOUT_MS = 30_000;
+export const RETRY_DELAYS_MS = [250, 500, 1000, 2000, 4000];
 const AUTH_INVALID_EVENT = 'golden-city:auth-invalid';
 const AUTH_SESSION_KEY = 'gc_auth_session';
+
+let hasWarmedUp = false;
 
 export interface AuthUser {
   userId: string;
@@ -137,6 +140,26 @@ export class ApiError extends Error {
   }
 }
 
+export interface DuplicatePagoErrorBody {
+  code: 'DUPLICATE_PAGO';
+  message: string;
+  existing: {
+    id: string;
+    usuario: string;
+    monto: number;
+    banco_id: string;
+    fecha_comprobante: string;
+    fecha_registro: string;
+  };
+}
+
+export class DuplicatePagoError extends Error {
+  constructor(public body: DuplicatePagoErrorBody) {
+    super(body.message);
+    this.name = 'DuplicatePagoError';
+  }
+}
+
 export function getStoredSession() {
   if (typeof window === 'undefined') {
     return null;
@@ -202,17 +225,21 @@ function isRetryableError(error: unknown) {
   return error instanceof ApiError && (error.kind === 'network' || error.kind === 'timeout');
 }
 
+export function isNetworkError(error: unknown): boolean {
+  return error instanceof ApiError && (error.kind === 'network' || error.kind === 'timeout');
+}
+
 function toFriendlyNetworkError(error: ApiError) {
   if (error.kind === 'timeout') {
-    return new ApiError('La API tardo mas de 10 segundos en responder. Verifica la conexion e intentalo otra vez.', 'timeout');
+    return new ApiError('La conexion con el backend tardo demasiado. Verifica la conexion e intentalo otra vez.', 'timeout');
   }
 
   return new ApiError('No se pudo conectar con el backend. Verifica tu conexion e intentalo otra vez.', 'network');
 }
 
-async function performRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+async function performRequest<T>(endpoint: string, options: RequestInit = {}, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const res = await fetch(`${API_BASE}${endpoint}`, {
@@ -226,18 +253,21 @@ async function performRequest<T>(endpoint: string, options: RequestInit = {}): P
 
     if (!res.ok) {
       const payload = await res.json().catch(() => null);
+      if (res.status === 409 && payload?.code === 'DUPLICATE_PAGO') {
+        throw new DuplicatePagoError(payload as DuplicatePagoErrorBody);
+      }
       const message = payload?.error || `HTTP ${res.status}`;
       throw new ApiError(message, 'http', res.status);
     }
 
     return res.json();
   } catch (error) {
-    if (error instanceof ApiError) {
+    if (error instanceof ApiError || error instanceof DuplicatePagoError) {
       throw error;
     }
 
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new ApiError('La API tardo mas de 10 segundos en responder. Intentalo de nuevo.', 'timeout');
+      throw new ApiError('La conexion con el backend tardo demasiado. Intentalo de nuevo.', 'timeout');
     }
 
     throw new ApiError('No se pudo conectar con el backend. Intentalo de nuevo.', 'network');
@@ -287,10 +317,14 @@ export async function refreshStoredSession() {
 
 async function request<T>(endpoint: string, options: RequestInit = {}, allowRefresh = true): Promise<T> {
   let lastError: unknown;
+  const timeoutMs = hasWarmedUp ? DEFAULT_TIMEOUT_MS : WARMUP_TIMEOUT_MS;
+  const maxAttempts = RETRY_DELAYS_MS.length;
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
-      return await performRequest<T>(endpoint, options);
+      const result = await performRequest<T>(endpoint, options, timeoutMs);
+      hasWarmedUp = true;
+      return result;
     } catch (error) {
       lastError = error;
 
@@ -309,16 +343,15 @@ async function request<T>(endpoint: string, options: RequestInit = {}, allowRefr
         throw error;
       }
 
-      if (attempt === 0 && isRetryableError(error)) {
-        await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+      if (isRetryableError(error) && attempt < maxAttempts - 1) {
+        const delay = RETRY_DELAYS_MS[attempt] ?? RETRY_DELAYS_MS[RETRY_DELAYS_MS.length - 1];
+        await new Promise((resolve) => setTimeout(resolve, delay));
         continue;
       }
 
-      if (error instanceof ApiError && (error.kind === 'network' || error.kind === 'timeout')) {
-        throw toFriendlyNetworkError(error);
+      if (!(error instanceof ApiError) || !(error.kind === 'network' || error.kind === 'timeout')) {
+        throw error;
       }
-
-      throw error;
     }
   }
 
@@ -494,12 +527,13 @@ export async function createPago(data: {
   comprobante_url?: string;
   comprobante_base64?: string;
   fecha_comprobante?: string;
-  }) {
-    return request<MutationResponse<Record<string, string>>>('/api/pagos', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+}, opts?: { confirmDuplicate?: boolean }) {
+  return request<MutationResponse<Record<string, string>>>('/api/pagos', {
+    method: 'POST',
+    body: JSON.stringify(data),
+    headers: opts?.confirmDuplicate ? { 'X-Confirm-Duplicate': 'true' } : undefined,
+  });
+}
 
 export async function updatePago(id: string, data: {
   usuario?: string;
@@ -517,11 +551,8 @@ export async function updatePago(id: string, data: {
   });
 }
 
-export async function cancelPago(id: string, motivo: string) {
-  return request<{ status: string; data: PagoRecord }>(`/api/pagos/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-    body: JSON.stringify({ motivo }),
-  });
+export async function deletePago(id: string): Promise<void> {
+  await request(`/api/pagos/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 export interface PagosFilters {
@@ -588,11 +619,8 @@ export async function updateIngreso(id: string, data: {
   });
 }
 
-export async function cancelIngreso(id: string, motivo: string) {
-  return request<{ status: string; data: IngresoRecord }>(`/api/ingresos/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-    body: JSON.stringify({ motivo }),
-  });
+export async function deleteIngreso(id: string): Promise<void> {
+  await request(`/api/ingresos/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 // Gastos
@@ -643,11 +671,8 @@ export async function updateGasto(id: string, data: {
   });
 }
 
-export async function cancelGasto(id: string, motivo: string) {
-  return request<{ status: string; data: GastoRecord }>(`/api/gastos/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-    body: JSON.stringify({ motivo }),
-  });
+export async function deleteGasto(id: string): Promise<void> {
+  await request(`/api/gastos/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 // Bancos
@@ -752,7 +777,7 @@ export interface BalanceSnapshot {
     total: number;
     detalle: BalanceExpenseDetail[];
   };
-  balanceDia: number;
+  cajaDisponible: number;
   balanceAcumulado: number;
   cajaInicioMes: number;
 }

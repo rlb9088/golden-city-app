@@ -85,15 +85,8 @@ app.use(express.json({ limit: '10mb' }));
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
+    uptime: process.uptime(),
     timestamp: new Date().toISOString(),
-    build: process.env.RAILWAY_GIT_COMMIT_SHA
-      || process.env.VERCEL_GIT_COMMIT_SHA
-      || process.env.GIT_COMMIT_SHA
-      || null,
-    ocr: {
-      visionConfigured: Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GOOGLE_CREDENTIALS_BASE64),
-      engineHint: process.env.GOOGLE_APPLICATION_CREDENTIALS || process.env.GOOGLE_CREDENTIALS_BASE64 ? 'vision' : 'tesseract',
-    },
   });
 });
 

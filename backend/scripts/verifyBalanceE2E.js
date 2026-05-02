@@ -45,7 +45,7 @@ function expectedSnapshot({
   agentTwo,
   totalGastosDetalle,
   totalGastos,
-  balanceDia,
+  cajaDisponible,
   balanceAcumulado,
   cajaInicioMes,
 }) {
@@ -79,7 +79,7 @@ function expectedSnapshot({
       total: totalGastos,
       detalle: totalGastosDetalle,
     },
-    balanceDia,
+    cajaDisponible,
     balanceAcumulado,
     cajaInicioMes,
   };
@@ -382,8 +382,8 @@ async function main() {
         { categoria: 'Personal', subcategoria: 'Nominas', monto: 40 },
       ],
       totalGastos: 70,
-      balanceDia: 360,
-      balanceAcumulado: 1360,
+      cajaDisponible: 1430,
+      balanceAcumulado: 1500,
       cajaInicioMes: seed.cajaInicioMes,
     }),
     mid: expectedSnapshot({
@@ -401,8 +401,8 @@ async function main() {
         { categoria: 'Servicios', subcategoria: 'Luz', monto: 30 },
       ],
       totalGastos: 120,
-      balanceDia: 180,
-      balanceAcumulado: 1540,
+      cajaDisponible: 1660,
+      balanceAcumulado: 1780,
       cajaInicioMes: seed.cajaInicioMes,
     }),
     end: expectedSnapshot({
@@ -421,8 +421,8 @@ async function main() {
         { categoria: 'Servicios', subcategoria: 'Luz', monto: 30 },
       ],
       totalGastos: 210,
-      balanceDia: 300,
-      balanceAcumulado: 1840,
+      cajaDisponible: 2050,
+      balanceAcumulado: 2260,
       cajaInicioMes: seed.cajaInicioMes,
     }),
   };

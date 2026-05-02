@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 function loadPagosService({
-  getAll,
+  getAll = async () => [],
   getConfigBancoById = async (bancoId) => (bancoId ? { id: bancoId, nombre: String(bancoId) } : null),
   getAuthUserById = async (userId) => (userId ? { id: userId, nombre: String(userId), username: String(userId).toLowerCase(), role: 'agent', activo: true } : null),
   getAuthUsers = async () => [],
@@ -21,6 +21,7 @@ function loadPagosService({
 
   const appendCalls = [];
   const updateCalls = [];
+  const deleteCalls = [];
   const auditCalls = [];
 
   require.cache[repoPath] = {
@@ -37,8 +38,19 @@ function loadPagosService({
         updateCalls.push({ sheetName, rowIndex, data, headers });
         return { status: 'success', mode: 'memory' };
       },
-      deleteRow: async () => ({}),
+      deleteRow: async (sheetName, rowIndex) => {
+        deleteCalls.push({ sheetName, rowIndex });
+        return { status: 'success', mode: 'memory' };
+      },
+      delete: async (sheetName, rowIndex) => {
+        deleteCalls.push({ sheetName, rowIndex });
+        return { status: 'success', mode: 'memory' };
+      },
       findByColumn: async () => [],
+      findById: async (sheetName, id) => {
+        const rows = typeof getAll === 'function' ? await getAll(sheetName) : [];
+        return rows.find((row) => row.id === id) || null;
+      },
     },
   };
 
@@ -78,6 +90,7 @@ function loadPagosService({
     service: require('../services/pagos.service'),
     appendCalls,
     updateCalls,
+    deleteCalls,
     auditCalls,
   };
 }
@@ -280,8 +293,8 @@ test('update conserva el estado y audita before/after', async () => {
   assert.equal(auditCalls[0][3].after.monto, 150);
 });
 
-test('cancel marca el registro como anulado y audita el motivo', async () => {
-  const { service, updateCalls, auditCalls } = loadPagosService({
+test('remove borra fisicamente el registro y audita el snapshot previo', async () => {
+  const { service, updateCalls, deleteCalls, auditCalls } = loadPagosService({
     getAll: async () => ([
       {
         _rowIndex: 7,
@@ -305,16 +318,55 @@ test('cancel marca el registro como anulado y audita el motivo', async () => {
     ]),
   });
 
-  const result = await service.cancel('PAG-2', 'Error de registro', {
+  const result = await service.remove('PAG-2', {
     userId: 'AUTH-ADMIN',
     role: 'admin',
     nombre: 'Administrador',
     user: 'Administrador',
   });
 
-  assert.equal(result.estado, 'anulado');
-  assert.deepStrictEqual(updateCalls[0].data.estado, 'anulado');
+  assert.deepStrictEqual(result, { id: 'PAG-2' });
+  assert.deepStrictEqual(updateCalls, []);
+  assert.deepStrictEqual(deleteCalls, [{ sheetName: 'pagos', rowIndex: 7 }]);
   assert.equal(auditCalls[0][0], 'delete');
   assert.equal(auditCalls[0][1], 'pago');
-  assert.equal(auditCalls[0][3].motivo, 'Error de registro');
+  assert.deepStrictEqual(auditCalls[0][3], {
+    before: {
+      id: 'PAG-2',
+      estado: '',
+      usuario: 'Maria Lopez',
+      caja: 'Caja 2',
+      banco_id: 'BK-2',
+      banco: 'Interbank',
+      monto: 80,
+      tipo: 'Efectivo',
+      comprobante_url: '',
+      comprobante_file_id: '',
+      fecha_comprobante: '',
+      fecha_registro: '2026-04-12T10:20:00',
+      agente: 'Agente 2',
+    },
+  });
+});
+
+test('remove con id inexistente responde NotFoundError', async () => {
+  const { service, deleteCalls, auditCalls } = loadPagosService({
+    getAll: async () => [],
+  });
+
+  await assert.rejects(
+    () => service.remove('PAG-NOPE', {
+      userId: 'AUTH-ADMIN',
+      role: 'admin',
+      nombre: 'Administrador',
+      user: 'Administrador',
+    }),
+    (error) => {
+      assert.equal(error.statusCode, 404);
+      return true;
+    },
+  );
+
+  assert.deepStrictEqual(deleteCalls, []);
+  assert.deepStrictEqual(auditCalls, []);
 });

@@ -22,8 +22,4 @@ const gastoUpdateSchema = z.object({
   message: 'Debes enviar al menos un campo para actualizar.',
 });
 
-const gastoCancelSchema = z.object({
-  motivo: z.string().min(1, 'El motivo de anulación es requerido'),
-});
-
-module.exports = { gastoSchema, gastoUpdateSchema, gastoCancelSchema };
+module.exports = { gastoSchema, gastoUpdateSchema };

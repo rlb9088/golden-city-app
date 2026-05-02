@@ -2,7 +2,7 @@ const repo = require('../repositories/sheetsRepository');
 const audit = require('./audit.service');
 const { nowLima } = require('../config/timezone');
 const { validateReferences, getConfigBancoById } = require('./config.service');
-const { BadRequestError, ForbiddenError, NotFoundError } = require('../utils/appError');
+const { ForbiddenError, NotFoundError } = require('../utils/appError');
 const { paginateItems } = require('../utils/pagination');
 const { createPrefixedId } = require('../utils/id');
 
@@ -143,10 +143,6 @@ function stripInternalFields(record) {
   return rest;
 }
 
-function isActivo(record) {
-  return normalizeEstado(record.estado) !== 'anulado';
-}
-
 async function create(data, caller) {
   const warnings = await validateReferences([
     {
@@ -215,6 +211,10 @@ async function getPaged(limit, offset, filters = {}) {
   return getPagedAndFiltered(filters, limit, offset);
 }
 
+async function getById(id) {
+  return repo.findById(SHEET_NAME, id);
+}
+
 function buildUpdatedGasto(existing, updates) {
   return {
     ...existing,
@@ -273,9 +273,8 @@ async function update(id, updates, caller) {
   return nextRecord;
 }
 
-async function cancel(id, motivo, caller) {
-  const gastos = await getAll();
-  const existing = gastos.find((gasto) => gasto.id === id);
+async function remove(id, caller) {
+  const existing = await repo.findById(SHEET_NAME, id);
 
   if (!existing) {
     throw new NotFoundError('No se encontró el gasto solicitado.', {
@@ -286,28 +285,12 @@ async function cancel(id, motivo, caller) {
     });
   }
 
-  if (!isActivo(existing)) {
-    throw new BadRequestError('El gasto ya se encuentra anulado.', {
-      context: {
-        sheet: SHEET_NAME,
-        id,
-      },
-    });
-  }
-
-  const nextRecord = {
-    ...existing,
-    estado: 'anulado',
-  };
-
-  await repo.update(SHEET_NAME, existing._rowIndex, nextRecord, HEADERS);
+  await repo.delete(SHEET_NAME, existing._rowIndex);
   await audit.log('delete', 'gasto', getAuthLabel(caller), {
     before: stripInternalFields(existing),
-    after: stripInternalFields(nextRecord),
-    motivo,
   });
 
-  return nextRecord;
+  return { id };
 }
 
 module.exports = {
@@ -315,6 +298,7 @@ module.exports = {
   getAll,
   getPaged,
   getPagedAndFiltered,
+  getById,
   update,
-  cancel,
+  remove,
 };

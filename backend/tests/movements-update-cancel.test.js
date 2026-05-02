@@ -15,6 +15,7 @@ function loadService({ serviceName, getAll, getConfigBancoById = async (bancoId)
   delete require.cache[configPath];
 
   const updateCalls = [];
+  const deleteCalls = [];
   const auditCalls = [];
 
   require.cache[repoPath] = {
@@ -28,8 +29,19 @@ function loadService({ serviceName, getAll, getConfigBancoById = async (bancoId)
         updateCalls.push({ sheetName, rowIndex, data, headers });
         return { status: 'success', mode: 'memory' };
       },
-      deleteRow: async () => ({}),
+      deleteRow: async (sheetName, rowIndex) => {
+        deleteCalls.push({ sheetName, rowIndex });
+        return { status: 'success', mode: 'memory' };
+      },
+      delete: async (sheetName, rowIndex) => {
+        deleteCalls.push({ sheetName, rowIndex });
+        return { status: 'success', mode: 'memory' };
+      },
       findByColumn: async () => [],
+      findById: async (sheetName, id) => {
+        const rows = typeof getAll === 'function' ? await getAll(sheetName) : [];
+        return rows.find((row) => row.id === id) || null;
+      },
     },
   };
 
@@ -75,12 +87,13 @@ function loadService({ serviceName, getAll, getConfigBancoById = async (bancoId)
   return {
     service: require(`../services/${serviceName}.service`),
     updateCalls,
+    deleteCalls,
     auditCalls,
   };
 }
 
-test('ingresos update/cancel preserves state and writes audit logs', async () => {
-  const { service, updateCalls, auditCalls } = loadService({
+test('ingresos update/remove preserves state and hard deletes with audit snapshot', async () => {
+  const { service, updateCalls, deleteCalls, auditCalls } = loadService({
     serviceName: 'ingresos',
     getAll: async () => ([
       {
@@ -110,15 +123,27 @@ test('ingresos update/cancel preserves state and writes audit logs', async () =>
   assert.equal(updateCalls[0].sheetName, 'ingresos');
   assert.equal(auditCalls[0][0], 'update');
 
-  const cancelled = await service.cancel('ING-1', 'Corrección de registro', 'admin-user');
-  assert.equal(cancelled.estado, 'anulado');
-  assert.equal(updateCalls[1].data.estado, 'anulado');
+  const removed = await service.remove('ING-1', 'admin-user');
+  assert.deepStrictEqual(removed, { id: 'ING-1' });
+  assert.equal(updateCalls.length, 1);
+  assert.deepStrictEqual(deleteCalls, [{ sheetName: 'ingresos', rowIndex: 4 }]);
   assert.equal(auditCalls[1][0], 'delete');
-  assert.equal(auditCalls[1][3].motivo, 'Corrección de registro');
+  assert.deepStrictEqual(auditCalls[1][3], {
+    before: {
+      id: 'ING-1',
+      estado: 'activo',
+      agente: 'Agente 1',
+      banco_id: 'BK-1',
+      banco: 'BCP',
+      monto: 250,
+      fecha_movimiento: '2026-04-16T09:00:00',
+      fecha_registro: '2026-04-16T09:05:00',
+    },
+  });
 });
 
-test('gastos update/cancel preserves state and writes audit logs', async () => {
-  const { service, updateCalls, auditCalls } = loadService({
+test('gastos update/remove preserves state and hard deletes with audit snapshot', async () => {
+  const { service, updateCalls, deleteCalls, auditCalls } = loadService({
     serviceName: 'gastos',
     getAll: async () => ([
       {
@@ -155,16 +180,50 @@ test('gastos update/cancel preserves state and writes audit logs', async () => {
   assert.equal(updateCalls[0].sheetName, 'gastos');
   assert.equal(auditCalls[0][0], 'update');
 
-  const cancelled = await service.cancel('GAS-1', 'Duplicado', {
+  const removed = await service.remove('GAS-1', {
     userId: 'AUTH-ADMIN',
     role: 'admin',
     nombre: 'Administrador',
     user: 'Administrador',
   });
-  assert.equal(cancelled.estado, 'anulado');
-  assert.equal(updateCalls[1].data.estado, 'anulado');
+  assert.deepStrictEqual(removed, { id: 'GAS-1' });
+  assert.equal(updateCalls.length, 1);
+  assert.deepStrictEqual(deleteCalls, [{ sheetName: 'gastos', rowIndex: 6 }]);
   assert.equal(auditCalls[1][0], 'delete');
-  assert.equal(auditCalls[1][3].motivo, 'Duplicado');
+  assert.deepStrictEqual(auditCalls[1][3], {
+    before: {
+      id: 'GAS-1',
+      estado: '',
+      fecha_gasto: '2026-04-15',
+      fecha_registro: '2026-04-15T08:00:00',
+      concepto: 'Papelería',
+      categoria: 'Operativo',
+      subcategoria: 'Material oficina',
+      banco_id: 'BK-2',
+      banco: 'Interbank',
+      monto: 90,
+    },
+  });
+});
+
+test('ingresos y gastos remove devuelven 404 cuando el id no existe', async () => {
+  for (const serviceName of ['ingresos', 'gastos']) {
+    const { service, deleteCalls, auditCalls } = loadService({
+      serviceName,
+      getAll: async () => [],
+    });
+
+    await assert.rejects(
+      () => service.remove(`${serviceName.toUpperCase()}-NOPE`, 'admin-user'),
+      (error) => {
+        assert.equal(error.statusCode, 404);
+        return true;
+      },
+    );
+
+    assert.deepStrictEqual(deleteCalls, []);
+    assert.deepStrictEqual(auditCalls, []);
+  }
 });
 
 test('ingresos create rejects a bank outside the selected agent scope', async () => {

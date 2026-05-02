@@ -19,7 +19,9 @@ node backend/scripts/verifyBalanceE2E.js
 - [ ] Con fecha historica se muestra el snapshot correcto.
 - [ ] Los anulados no afectan los totales.
 - [ ] Los desgloses cuadran con los totales.
-- [ ] Editar `caja_inicio_mes` desde Configuracion impacta el Balance acumulado.
+- [ ] `Caja disponible` cuadra con bancos admin + cajas de agentes - `caja_inicio_mes`.
+- [ ] `Balance acumulado` cuadra con bancos admin + cajas de agentes + gastos - `caja_inicio_mes`.
+- [ ] Editar `caja_inicio_mes` desde Configuracion impacta Caja disponible y Balance acumulado.
 - [ ] Cambiar el filtro de fecha actualiza todos los KPIs y tablas.
 
 ## Criterio de cierre

@@ -1,7 +1,7 @@
 # Arquitectura — Golden City Backoffice
 
-> **Versión**: 1.7  
-> **Última actualización**: 2026-04-20
+> **Versión**: 1.8  
+> **Última actualización**: 2026-05-02
 
 ---
 
@@ -95,15 +95,15 @@ frontend/src/
 │   │   └── balance.css
 │   │
 │   ├── pagos/
-│   │   ├── page.tsx            # Formulario + tabla de pagos (con OCR, filtros, anular/editar)
+│   │   ├── page.tsx            # Formulario + tabla de pagos (con OCR, filtros, eliminar/editar, anti-duplicados)
 │   │   └── pagos.css
 │   │
 │   ├── ingresos/
-│   │   ├── page.tsx            # Formulario + tabla de ingresos (admin, anular/editar)
+│   │   ├── page.tsx            # Formulario + tabla de ingresos (admin, eliminar/editar)
 │   │   └── ingresos.css
 │   │
 │   ├── gastos/
-│   │   ├── page.tsx            # Formulario + tabla de gastos (admin, anular/editar)
+│   │   ├── page.tsx            # Formulario + tabla de gastos (admin, eliminar/editar)
 │   │   └── gastos.css
 │   │
 │   ├── bancos/
@@ -177,9 +177,9 @@ backend/
 │
 ├── routes/
 │   ├── auth.routes.js          # POST /login, GET /me (JWT)
-│   ├── pagos.routes.js         # POST /, GET /, PUT /:id, DELETE /:id (anular)
-│   ├── ingresos.routes.js      # POST /, GET /, PUT /:id, DELETE /:id (anular)
-│   ├── gastos.routes.js        # POST /, GET /, PUT /:id, DELETE /:id (anular)
+│   ├── pagos.routes.js         # POST /, GET /, GET /:id, PUT /:id, DELETE /:id (hard delete)
+│   ├── ingresos.routes.js      # POST /, GET /, GET /:id, PUT /:id, DELETE /:id (hard delete)
+│   ├── gastos.routes.js        # POST /, GET /, GET /:id, PUT /:id, DELETE /:id (hard delete)
 │   ├── bancos.routes.js        # POST /, GET /
 │   ├── balance.routes.js       # GET /, GET /:agente
 │   ├── config.routes.js        # Full CRUD + import + delete
@@ -267,15 +267,18 @@ Google Sheets API / In-memory store
 | POST | `/api/pagos` | Auth | Crear pago |
 | GET | `/api/pagos` | Auth | Listar pagos (filtros: desde/hasta/agente/banco/usuario) |
 | PUT | `/api/pagos/:id` | Admin | Editar pago |
-| DELETE | `/api/pagos/:id` | Admin | Anular pago (soft-delete: estado='anulado', audita) |
+| GET | `/api/pagos/:id` | Auth | Obtener pago por id |
+| DELETE | `/api/pagos/:id` | Admin | Eliminar pago (hard delete de fila, audita snapshot `before`) |
 | POST | `/api/ingresos` | Admin | Crear ingreso |
 | GET | `/api/ingresos` | Auth | Listar ingresos |
 | PUT | `/api/ingresos/:id` | Admin | Editar ingreso |
-| DELETE | `/api/ingresos/:id` | Admin | Anular ingreso |
+| GET | `/api/ingresos/:id` | Auth | Obtener ingreso por id |
+| DELETE | `/api/ingresos/:id` | Admin | Eliminar ingreso (hard delete de fila, audita snapshot `before`) |
 | POST | `/api/gastos` | Admin | Crear gasto |
 | GET | `/api/gastos` | Auth | Listar gastos |
 | PUT | `/api/gastos/:id` | Admin | Editar gasto |
-| DELETE | `/api/gastos/:id` | Admin | Anular gasto |
+| GET | `/api/gastos/:id` | Auth | Obtener gasto por id |
+| DELETE | `/api/gastos/:id` | Admin | Eliminar gasto (hard delete de fila, audita snapshot `before`) |
 | POST | `/api/bancos` | Admin | Upsert saldo bancario |
 | GET | `/api/bancos` | Auth | Listar saldos bancarios |
 | GET | `/api/balance?fecha=` | Auth | Balance global al cierre de una fecha; vacío = ahora (excluye anulados) |
@@ -399,7 +402,7 @@ Frontend (localhost:3000)  →  Backend (localhost:3001)
 | Backend: saldos bancarios | ✅ Completo | Con upsert + auditoría |
 | Backend: balance calculation | ✅ Completo | Global + por agente |
 | Backend: config CRUD | ✅ Completo | CRUD + seed data + deleteRow real + auditoría |
-| Backend: config settings | 🆕 En curso | Hoja singleton `config_settings` + endpoint dedicado para `caja_inicio_mes` |
+| Backend: config settings | ✅ Completo | Hoja singleton `config_settings` + endpoint dedicado para `caja_inicio_mes` |
 | Backend: OCR pipeline | ✅ Completo | Vision + Tesseract fallback |
 | Backend: auditoría | ✅ Completo | Append-only |
 | Backend: error handling | ✅ Completo | AppError hierarchy + retry con backoff |
@@ -411,22 +414,24 @@ Frontend (localhost:3000)  →  Backend (localhost:3001)
 | Frontend: dashboard balance | ✅ Completo | 5 KPIs + 3 tablas + date picker + skeleton (excluye anulados) |
 | Frontend: paginación de listados | ✅ Completo | PaginationControls unificado en pagos, ingresos, gastos, bancos y audit |
 | Frontend: refresh tokens | ✅ Completo | Interceptor de 401 renueva sesión con refresh token |
-| Frontend: formulario pagos | ✅ Completo | Con OCR + validación + skeleton + filtros + editar/anular |
+| Frontend: formulario pagos | ✅ Completo | Con OCR + validación + skeleton + filtros + eliminar/editar + detección de duplicados |
 | Frontend: formulario ingresos | ✅ Completo | Admin only |
 | Frontend: formulario gastos | ✅ Completo | Con categorías dinámicas |
 | Frontend: formulario bancos | ✅ Completo | Con upsert warning |
 | Frontend: configuración | ✅ Completo | CRUD completo con edición e importación masiva |
 | Frontend: auditoría UI | ✅ Completo | Tabla + filtros + JSON expandible (admin only) |
-| Frontend: UX resilience | ✅ Completo | Health polling, timeout, retry, skeletons |
+| Frontend: UX resilience | ✅ Completo | Health polling, retry/backoff 5 intentos (250→4000ms), warmup 30s, banner estados |
 | Google Sheets: conexión | ✅ Completo | Configurado y verificado E2E |
 | Google Sheets: hojas creadas | ✅ Completo | Script automático + verificación |
 | Auth real | ✅ Completo | JWT + bcrypt (tabla `config_agentes`, bootstrap configurable; ver ADR-021) |
 | Identidad unificada + scoping por propietario | ✅ Completo | `config_agentes` fuente única; `banco_id` FK; GET /bancos/scoped; validación 403 en pagos/ingresos/bancos |
 | Migración R2 (comprobantes) | ✅ Completo | R2 reemplaza Drive; degradación elegante si R2 no configurado (ver ADR-020) |
 | Filtros pagos | ✅ Completo | Query params + normalización de fechas + combinación AND |
-| Anulación/edición | ✅ Completo | Soft-delete (estado='anulado'), auditoría con motivo |
+| Eliminación/edición backend | ✅ Completo | DELETE de pagos, ingresos y gastos borra la fila física; auditoría conserva snapshot `before`. Filas históricas con `estado='anulado'` siguen excluidas del balance |
+| Keep-alive / health | ✅ Completo | `GET /api/health` (excluido de rate-limit); `HEALTHCHECK` en Dockerfile; `railway.json` con healthcheckPath |
+| Detección de duplicados | ✅ Completo | Ventana 10 min por usuario+monto+banco+fecha; 409 con snapshot; bypass via `X-Confirm-Duplicate: true`; modal en frontend |
 | Comprobantes de pago | ✅ Completo | Imagen persistida en Cloudflare R2 con `comprobante_file_id` |
-| Tests | ✅ Completo | 8 suites node:test + E2E contra Sheets real |
+| Tests | ✅ Completo | 9 suites node:test (152 casos) + E2E contra Sheets real |
 | CI/CD | ✅ Completo | GitHub Actions ejecuta tests backend, lint/build frontend, npm audit y docker build en main |
 | Deploy | ✅ Completo | Dockerfile, entrypoint, .gitignore, .dockerignore y guia de deploy listos |
 
@@ -440,8 +445,8 @@ Frontend (localhost:3000)  →  Backend (localhost:3001)
 - **Comprobantes**: Cloudflare R2 con CORS restringido al dominio Vercel.
 - **Migraciones pre-producción**: ejecutadas (TICKET-055).
 
-### Deuda técnica activa (Sprint 12)
-- **TICKET-057** — Cambios sin commitear en `sheetsRepository.js` que migran headers legacy de `ingresos`, `gastos` y `bancos` (hotfix detectado en producción). Falta integrarlos al control de versiones y al pipeline.
+### Deuda técnica pendiente
+- **TICKET-057** — Headers legacy de `ingresos`, `gastos` y `bancos` integrados en código; pendiente verificar CI/CD pipeline.
 - **TICKET-058** — Procedimiento de backup y rollback para Google Sheets y Cloudflare R2 sin documentar.
 - **TICKET-059 (P3)** — Resuelto: IDs migrados a `crypto.randomUUID()` en `pagos`, `ingresos`, `gastos`, `bancos`, `audit` y `config_*`.
 

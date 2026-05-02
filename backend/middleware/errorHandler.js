@@ -1,4 +1,4 @@
-const { AppError, NotFoundError } = require('../utils/appError');
+const { AppError, NotFoundError, DuplicatePagoError } = require('../utils/appError');
 const logger = require('../lib/logger');
 
 function serializeError(err) {
@@ -33,6 +33,15 @@ function notFoundHandler(req, res, next) {
 function errorHandler(err, req, res, next) {
   if (res.headersSent) {
     return next(err);
+  }
+
+  if (err instanceof DuplicatePagoError) {
+    logError(err, req);
+    return res.status(409).json({
+      code: 'DUPLICATE_PAGO',
+      message: err.message,
+      existing: err.existing,
+    });
   }
 
   const statusCode = err?.statusCode || err?.status || 500;

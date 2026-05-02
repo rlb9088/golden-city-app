@@ -1,17 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useState, useRef } from 'react';
-import { getConfig, createIngreso, getIngresos, getScopedBancos, updateIngreso, cancelIngreso, type ConfigAgent, type ConfigBanco, type IngresoRecord } from '@/lib/api';
+import { getConfig, createIngreso, getIngresos, getScopedBancos, updateIngreso, deleteIngreso, isNetworkError, type ConfigAgent, type ConfigBanco, type IngresoRecord } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { formatCurrency, formatDateTime, getNowLima } from '@/lib/format';
 import AlertBanner from '@/components/AlertBanner';
 import PaginationControls from '@/components/PaginationControls';
 import TableSkeleton from '@/components/TableSkeleton';
 import './ingresos.css';
-
-function isAnulado(record: IngresoRecord) {
-  return String(record.estado ?? '').trim().toLowerCase() === 'anulado';
-}
 
 function toDateTimeLocalValue(value: string) {
   const trimmed = value.trim();
@@ -46,7 +42,7 @@ export default function IngresosPage() {
   const [pagination, setPagination] = useState({ limit: PAGE_SIZE, offset: 0, total: 0, hasMore: false });
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [actionLoading, setActionLoading] = useState<{ type: 'edit' | 'cancel'; id: string } | null>(null);
+  const [actionLoading, setActionLoading] = useState<{ type: 'edit' | 'delete'; id: string } | null>(null);
   const [alert, setAlert] = useState<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null);
 
   const [agente, setAgente] = useState('');
@@ -55,8 +51,7 @@ export default function IngresosPage() {
   const [fechaMovimiento, setFechaMovimiento] = useState(getNowLima());
   const [editingIngreso, setEditingIngreso] = useState<IngresoRecord | null>(null);
   const [editForm, setEditForm] = useState({ agente: '', banco: '', monto: '', fecha_movimiento: '' });
-  const [cancelTarget, setCancelTarget] = useState<IngresoRecord | null>(null);
-  const [cancelReason, setCancelReason] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<IngresoRecord | null>(null);
   const montoRef = useRef<HTMLInputElement>(null);
   const currentPageRef = useRef(0);
 
@@ -87,14 +82,12 @@ export default function IngresosPage() {
     setEditingIngreso(null);
   }, []);
 
-  const openCancelModal = useCallback((ingreso: IngresoRecord) => {
-    setCancelTarget(ingreso);
-    setCancelReason('');
+  const openDeleteModal = useCallback((ingreso: IngresoRecord) => {
+    setDeleteTarget(ingreso);
   }, []);
 
-  const closeCancelModal = useCallback(() => {
-    setCancelTarget(null);
-    setCancelReason('');
+  const closeDeleteModal = useCallback(() => {
+    setDeleteTarget(null);
   }, []);
 
   const handleUpdateIngreso = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
@@ -125,27 +118,21 @@ export default function IngresosPage() {
     }
   }, [closeEditModal, editForm, editScopedBancos.length, editingIngreso, refreshIngresos]);
 
-  const handleCancelIngreso = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!cancelTarget) return;
-
-    if (!cancelReason.trim()) {
-      setAlert({ type: 'error', message: 'Escribe un motivo para anular el ingreso' });
-      return;
-    }
+  const handleDeleteIngreso = useCallback(async () => {
+    if (!deleteTarget) return;
 
     try {
-      setActionLoading({ type: 'cancel', id: cancelTarget.id });
-      await cancelIngreso(cancelTarget.id, cancelReason.trim());
-      setAlert({ type: 'success', message: 'Ingreso anulado correctamente' });
-      closeCancelModal();
-      await refreshIngresos();
+      setActionLoading({ type: 'delete', id: deleteTarget.id });
+      await deleteIngreso(deleteTarget.id);
+      setIngresos((prev) => prev.filter((i) => i.id !== deleteTarget.id));
+      setAlert({ type: 'success', message: 'Ingreso eliminado correctamente.' });
+      closeDeleteModal();
     } catch (err) {
-      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al anular ingreso' });
+      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al eliminar ingreso' });
     } finally {
       setActionLoading(null);
     }
-  }, [cancelReason, cancelTarget, closeCancelModal, refreshIngresos]);
+  }, [deleteTarget, closeDeleteModal]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -157,7 +144,9 @@ export default function IngresosPage() {
         setAgente((current) => current || configRes.agentes[0] || '');
         setBanco('');
       } catch (err) {
-        setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar datos' });
+        if (!isNetworkError(err)) {
+          setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar datos' });
+        }
       } finally {
         setLoading(false);
       }
@@ -202,7 +191,9 @@ export default function IngresosPage() {
         }
         setScopedBancos([]);
         setBanco('');
-        setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar bancos del agente' });
+        if (!isNetworkError(err)) {
+          setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar bancos del agente' });
+        }
       }
     };
 
@@ -250,7 +241,9 @@ export default function IngresosPage() {
           return;
         }
         setEditScopedBancos([]);
-        setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar bancos del ingreso' });
+        if (!isNetworkError(err)) {
+          setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar bancos del ingreso' });
+        }
       }
     };
 
@@ -267,7 +260,7 @@ export default function IngresosPage() {
     }
 
     void loadIngresosPage(currentPageRef.current - 1).catch((err) => {
-      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cambiar de pagina' });
+      if (!isNetworkError(err)) setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cambiar de pagina' });
     });
   }, [loadIngresosPage, loading, pagination.offset]);
 
@@ -277,7 +270,7 @@ export default function IngresosPage() {
     }
 
     void loadIngresosPage(currentPageRef.current + 1).catch((err) => {
-      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cambiar de pagina' });
+      if (!isNetworkError(err)) setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cambiar de pagina' });
     });
   }, [loadIngresosPage, loading, pagination.hasMore]);
 
@@ -403,25 +396,20 @@ export default function IngresosPage() {
         ) : (
           <div className="table-container">
             <table className="table" id="ingresos-table">
-              <thead><tr><th>Fecha Movimiento</th><th>Agente</th><th>Banco</th><th>Estado</th><th style={{textAlign:'right'}}>Monto</th><th>Registrado</th>{isAdmin && <th style={{textAlign:'right'}}>Acciones</th>}</tr></thead>
+              <thead><tr><th>Fecha Movimiento</th><th>Agente</th><th>Banco</th><th style={{textAlign:'right'}}>Monto</th><th>Registrado</th>{isAdmin && <th style={{textAlign:'right'}}>Acciones</th>}</tr></thead>
               <tbody>
                 {ingresos.map((i, idx) => (
-                  <tr key={i.id || idx} className={isAnulado(i) ? 'mov-row mov-row--anulado' : 'mov-row'}>
+                  <tr key={i.id || idx} className="mov-row">
                     <td><strong>{formatDateTime(i.fecha_movimiento)}</strong></td>
                     <td><strong>{i.agente}</strong></td>
                     <td><span className="badge badge-blue">{i.banco}</span></td>
-                    <td><span className={`badge ${isAnulado(i) ? 'badge-red' : 'badge-green'}`}>{isAnulado(i) ? 'Anulado' : 'Activo'}</span></td>
-                    <td className="text-right"><span className={`amount ${isAnulado(i) ? 'amount-muted' : 'amount-positive'}`}>{formatCurrency(i.monto)}</span></td>
+                    <td className="text-right"><span className="amount amount-positive">{formatCurrency(i.monto)}</span></td>
                     <td className="text-muted" style={{fontSize:'0.75rem'}}>{formatDateTime(i.fecha_registro || '')}</td>
                     {isAdmin && (
                       <td className="text-right">
                         <div className="row-actions">
                           <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEditModal(i)} disabled={Boolean(actionLoading)}>Editar</button>
-                          {!isAnulado(i) ? (
-                            <button type="button" className="btn btn-danger btn-sm" onClick={() => openCancelModal(i)} disabled={Boolean(actionLoading)}>Anular</button>
-                          ) : (
-                            <span className="text-muted">Sin acciones</span>
-                          )}
+                          <button type="button" className="btn btn-danger btn-sm" onClick={() => openDeleteModal(i)} disabled={Boolean(actionLoading)}>Eliminar</button>
                         </div>
                       </td>
                     )}
@@ -495,38 +483,33 @@ export default function IngresosPage() {
         </div>
       )}
 
-      {isAdmin && cancelTarget && (
-        <div className="modal-overlay" role="presentation" onClick={closeCancelModal}>
-          <div className="modal-card card" role="dialog" aria-modal="true" aria-labelledby="cancel-ingreso-title" onClick={(event) => event.stopPropagation()}>
+      {isAdmin && deleteTarget && (
+        <div className="modal-overlay" role="presentation" onClick={closeDeleteModal}>
+          <div className="modal-card card" role="dialog" aria-modal="true" aria-labelledby="delete-ingreso-title" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <div>
-                <h3 id="cancel-ingreso-title" className="balance-section-title" style={{ marginBottom: '4px', fontSize: '1rem' }}>
-                  Anular ingreso
+                <h3 id="delete-ingreso-title" className="balance-section-title" style={{ marginBottom: '4px', fontSize: '1rem' }}>
+                  Eliminar ingreso
                 </h3>
-                <p className="page-subtitle" style={{ margin: 0 }}>El registro no se borrará. Solo cambiará su estado a anulado.</p>
+                <p className="page-subtitle" style={{ margin: 0 }}>¿Eliminar este ingreso? Esta acción no se puede deshacer.</p>
               </div>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={closeCancelModal}>Cerrar</button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={closeDeleteModal}>Cerrar</button>
             </div>
 
-            <form className="modal-form" onSubmit={handleCancelIngreso}>
+            <div className="modal-form">
               <div className="modal-summary">
                 <div>
-                  <strong>{cancelTarget.agente}</strong>
-                  <p className="page-subtitle" style={{ margin: '4px 0 0' }}>{cancelTarget.banco} · {formatCurrency(cancelTarget.monto)}</p>
+                  <strong>{deleteTarget.agente}</strong>
+                  <p className="page-subtitle" style={{ margin: '4px 0 0' }}>{deleteTarget.banco} · {formatCurrency(deleteTarget.monto)}</p>
                 </div>
-                <span className="badge badge-red">Anulación administrativa</span>
               </div>
-              <label className="field-group">
-                <span className="label">Motivo de anulación</span>
-                <textarea className="input modal-textarea" value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="Describe por qué se anula este ingreso" rows={4} required />
-              </label>
               <div className="modal-actions">
-                <button type="button" className="btn btn-secondary" onClick={closeCancelModal} disabled={Boolean(actionLoading)}>Volver</button>
-                <button type="submit" className="btn btn-danger" disabled={Boolean(actionLoading)}>
-                  {actionLoading?.type === 'cancel' && actionLoading.id === cancelTarget.id ? 'Anulando...' : 'Confirmar anulación'}
+                <button type="button" className="btn btn-secondary" onClick={closeDeleteModal} disabled={Boolean(actionLoading)}>Cancelar</button>
+                <button type="button" className="btn btn-danger" onClick={handleDeleteIngreso} disabled={Boolean(actionLoading)}>
+                  {actionLoading?.type === 'delete' && actionLoading.id === deleteTarget.id ? 'Eliminando...' : 'Eliminar'}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}

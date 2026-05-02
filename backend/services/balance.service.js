@@ -550,7 +550,6 @@ function buildSnapshotForDate(targetDate, ctx, { nowMode = false } = {}) {
     allowedBankIds: ctx.agentBankIds,
   });
   const gastosUpToDate = aggregateGastos(ctx.gastos, targetDate, { exactDate: false });
-  const gastosHoy = aggregateGastos(ctx.gastos, targetDate, { exactDate: true });
   const adminIngresosHoy = aggregateIngresosByBank(ctx.ingresos, targetDate, { exactDate: true });
   const adminGastosHoy = aggregateGastos(ctx.gastos, targetDate, { exactDate: true });
 
@@ -582,33 +581,11 @@ function buildSnapshotForDate(targetDate, ctx, { nowMode = false } = {}) {
 
   const cajasAgentes = buildCajasDetalle(ingresosUpToDate, pagosUpToDate);
   const totalGastos = buildGastosDetalle(gastosUpToDate);
-  const gastosDelDia = buildGastosDetalle(gastosHoy);
 
   const bancosAdminTotal = bancosAdmin.reduce((sum, item) => sum + parseAmount(item.saldo), 0);
   const cajasAgentesTotal = cajasAgentes.total;
-  const activosTotales = bancosAdminTotal + cajasAgentesTotal;
-  const previousDate = subtractOneDay(targetDate);
-
-  const previousBancosAdmin = adminBankRows
-    .map((bank) => {
-      const snapshot = findLatestSnapshot(bancosSnapshots, bank.id, previousDate);
-      return parseAmount(snapshot?.saldo);
-    })
-    .reduce((sum, value) => sum + value, 0);
-
-  const previousIngresos = aggregateIngresosByBank(ctx.ingresos, previousDate, {
-    exactDate: false,
-    allowedBankIds: ctx.agentBankIds,
-  });
-  const previousPagos = aggregatePagosByBank(ctx.pagos, previousDate, {
-    exactDate: false,
-    allowedBankIds: ctx.agentBankIds,
-  });
-  const previousCajas = buildCajasDetalle(previousIngresos, previousPagos).total;
-  const previousAssets = previousBancosAdmin + previousCajas;
-
-  const balanceDia = activosTotales - previousAssets - gastosDelDia.total;
-  const balanceAcumulado = activosTotales - totalGastos.total - ctx.cajaInicioMes;
+  const cajaDisponible = bancosAdminTotal + cajasAgentesTotal - ctx.cajaInicioMes;
+  const balanceAcumulado = bancosAdminTotal + cajasAgentesTotal + totalGastos.total - ctx.cajaInicioMes;
 
   return {
     fecha: nowMode ? null : targetDate,
@@ -624,7 +601,7 @@ function buildSnapshotForDate(targetDate, ctx, { nowMode = false } = {}) {
       })),
     },
     totalGastos,
-    balanceDia,
+    cajaDisponible,
     balanceAcumulado,
     cajaInicioMes: ctx.cajaInicioMes,
   };

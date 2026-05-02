@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/auth-context';
 import {
   getBalance,
   getSetting,
+  isNetworkError,
   type ConfigSetting,
   type BalanceAgentDetail,
   type BalanceBankDetail,
@@ -186,7 +187,9 @@ export default function BalancePage() {
       setBalance(response.data);
       setError('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al cargar balance');
+      if (!isNetworkError(err)) {
+        setError(err instanceof Error ? err.message : 'Error al cargar balance');
+      }
     } finally {
       if (background) {
         setRefreshing(false);
@@ -401,17 +404,17 @@ export default function BalancePage() {
         />
         <StatsCard
           icon="📉"
-          label="Balance del dia"
-          value={balance.balanceDia}
-          variant={getKpiVariant(balance.balanceDia, 'neutral')}
-          subtitle="Cierre actual menos cierre previo"
+          label="Caja disponible"
+          value={balance.cajaDisponible}
+          variant={getKpiVariant(balance.cajaDisponible, 'neutral')}
+          subtitle="Bancos admin + Cajas agentes - Caja inicio mes"
         />
         <StatsCard
           icon="✨"
           label="Balance acumulado"
           value={balance.balanceAcumulado}
           variant={getKpiVariant(balance.balanceAcumulado, 'neutral')}
-          subtitle="Bancos + cajas - gastos - caja inicio mes"
+          subtitle="Bancos + Cajas + Gastos - Caja inicio mes"
         />
       </div>
 

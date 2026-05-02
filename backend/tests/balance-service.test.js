@@ -126,7 +126,7 @@ test('getBalanceAt sin fecha y sin datos retorna ceros', async () => {
       total: 0,
       detalle: [],
     },
-    balanceDia: 0,
+    cajaDisponible: 0,
     balanceAcumulado: 0,
     cajaInicioMes: 0,
   });
@@ -167,7 +167,7 @@ test('getBalanceAt con fecha especifica usa solo snapshots de bancos admin de es
       total: 0,
       detalle: [],
     },
-    balanceDia: 300,
+    cajaDisponible: 300,
     balanceAcumulado: 300,
     cajaInicioMes: 0,
   });
@@ -205,7 +205,7 @@ test('getBalanceAt con carry-forward usa el snapshot mas reciente anterior', asy
       total: 0,
       detalle: [],
     },
-    balanceDia: 0,
+    cajaDisponible: 300,
     balanceAcumulado: 300,
     cajaInicioMes: 0,
   });
@@ -254,8 +254,8 @@ test('getBalanceAt sin fecha y sin snapshot de hoy combina ayer mas movimientos 
         { categoria: 'Operativo', subcategoria: 'Limpieza', monto: 10 },
       ],
     },
-    balanceDia: 20,
-    balanceAcumulado: 320,
+    cajaDisponible: 330,
+    balanceAcumulado: 340,
     cajaInicioMes: 0,
   });
 });
@@ -292,7 +292,7 @@ test('getBalanceAt no cuenta bancos de agentes como bancos admin', async () => {
       total: 0,
       detalle: [],
     },
-    balanceDia: 50,
+    cajaDisponible: 50,
     balanceAcumulado: 50,
     cajaInicioMes: 0,
   });
@@ -344,8 +344,8 @@ test('getBalanceAt excluye anulados en ingresos, pagos y gastos', async () => {
         { categoria: 'Operativo', subcategoria: 'Limpieza', monto: 30 },
       ],
     },
-    balanceDia: 50,
-    balanceAcumulado: 50,
+    cajaDisponible: 80,
+    balanceAcumulado: 110,
     cajaInicioMes: 0,
   });
 });
@@ -382,7 +382,7 @@ test('getBalanceAt en el primer dia del mes mantiene carry-forward y deja cajas 
       total: 0,
       detalle: [],
     },
-    balanceDia: 0,
+    cajaDisponible: 75,
     balanceAcumulado: 75,
     cajaInicioMes: 0,
   });
@@ -433,10 +433,40 @@ test('getBalanceAt usa caja_inicio_mes en el balance acumulado', async () => {
       total: 0,
       detalle: [],
     },
-    balanceDia: 130,
+    cajaDisponible: 55,
     balanceAcumulado: 55,
     cajaInicioMes: 75,
   });
+});
+
+test('getBalanceAt expone cajaDisponible y suma gastos en balanceAcumulado', async () => {
+  const service = loadBalanceService({
+    ingresos: [
+      { agente: 'Agente 1', banco_id: 'BK-G1', banco: 'Caja 1', monto: 600, fecha_movimiento: '2026-04-19', estado: 'activo' },
+    ],
+    pagos: [
+      { agente: 'Agente 1', banco_id: 'BK-G1', banco: 'Caja 1', monto: 100, fecha_comprobante: '2026-04-19', estado: 'activo' },
+    ],
+    gastos: [
+      { categoria: 'Operativo', subcategoria: 'Limpieza', monto: 200, fecha_gasto: '2026-04-19', estado: 'activo' },
+    ],
+    bancosSnapshots: [
+      { banco_id: 'BK-A', banco: 'Admin A', fecha: '2026-04-19', saldo: 1000, _rowIndex: 2 },
+    ],
+    configBancos: [
+      { id: 'BK-A', nombre: 'Admin A' },
+      { id: 'BK-G1', nombre: 'Caja 1' },
+    ],
+    adminBankIds: ['BK-A'],
+    agentBankIds: ['BK-G1'],
+    cajaInicioMes: 300,
+  });
+
+  const result = await service.getBalanceAt({ fecha: '2026-04-19' });
+
+  assert.equal(Object.hasOwn(result, 'balanceDia'), false);
+  assert.equal(result.cajaDisponible, 1200);
+  assert.equal(result.balanceAcumulado, 1400);
 });
 
 test('getBalanceAt desglosa agentes con movimientos y omite los que no tienen', async () => {
@@ -484,7 +514,7 @@ test('getBalanceAt desglosa agentes con movimientos y omite los que no tienen', 
       total: 0,
       detalle: [],
     },
-    balanceDia: 150,
+    cajaDisponible: 150,
     balanceAcumulado: 150,
     cajaInicioMes: 0,
   });
@@ -522,8 +552,8 @@ test('getBalanceAt agrupa correctamente gastos por subcategoria', async () => {
         { categoria: 'Personal', subcategoria: 'Nominas', monto: 5 },
       ],
     },
-    balanceDia: -65,
-    balanceAcumulado: -65,
+    cajaDisponible: 0,
+    balanceAcumulado: 65,
     cajaInicioMes: 0,
   });
 });

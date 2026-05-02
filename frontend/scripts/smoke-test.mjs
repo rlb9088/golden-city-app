@@ -19,10 +19,12 @@ function assert(condition, message) {
 }
 
 const api = read('src/lib/api.ts');
-assert(api.includes('DEFAULT_TIMEOUT_MS = 10_000'), 'API timeout should be 10 seconds');
-assert(api.includes('RETRY_DELAY_MS = 250'), 'API retry delay should exist');
+assert(api.includes('DEFAULT_TIMEOUT_MS = 15_000'), 'API default timeout should be 15 seconds');
+assert(api.includes('WARMUP_TIMEOUT_MS = 30_000'), 'API warmup timeout should be 30 seconds');
+assert(api.includes('RETRY_DELAYS_MS = [250, 500, 1000, 2000, 4000]'), 'API retry delays should use exponential backoff');
 assert(api.includes('checkBackendHealth'), 'Backend health check should be exposed');
 assert(api.includes('performRequest'), 'Core request helper should exist');
+assert(api.includes('isNetworkError'), 'isNetworkError helper should be exported');
 
 const alertBanner = read('src/components/AlertBanner.tsx');
 assert(alertBanner.includes('success: 4000'), 'Success alerts should auto-dismiss after 4s');
@@ -31,6 +33,8 @@ assert(alertBanner.includes("role={type === 'error' ? 'alert' : 'status'}"), 'Al
 
 const backendStatus = read('src/components/BackendStatusBanner.tsx');
 assert(backendStatus.includes('checkBackendHealth'), 'Backend status banner should ping the backend');
+assert(backendStatus.includes('warmup'), 'Backend status banner should have warmup state');
+assert(backendStatus.includes('HEALTH_POLL_FAST_MS'), 'Backend status banner should use fast polling during warmup');
 
 const globals = read('src/app/globals.css');
 assert(globals.includes('.skeleton-card'), 'Skeleton styles should exist');

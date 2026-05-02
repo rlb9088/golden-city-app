@@ -1,7 +1,7 @@
 # Decisiones Técnicas — Golden City Backoffice
 
-> **Versión**: 1.6  
-> **Última actualización**: 2026-04-19
+> **Versión**: 1.8  
+> **Última actualización**: 2026-05-02
 
 Este documento registra las decisiones técnicas clave del proyecto, con su contexto, alternativas evaluadas y razón de la elección. Se actualiza conforme evoluciona el proyecto.
 
@@ -329,8 +329,9 @@ Reemplazar auth por headers HTTP con JWT basado en credenciales username/passwor
 
 ## ADR-015: Soft-delete con campo `estado`
 
-**Estado**: ✅ Vigente  
+**Estado**: ⛔ Superseded por ADR-024  
 **Fecha**: 2026-04-16  
+**Reemplazado**: 2026-05-02
 
 ### Decisión
 Implementar anulación/eliminación lógica (soft-delete) mediante campo `estado` en pagos, ingresos y gastos. Las filas nunca se borran; sólo cambian de `estado='activo'` a `estado='anulado'`.
@@ -350,7 +351,8 @@ Implementar anulación/eliminación lógica (soft-delete) mediante campo `estado
 ### Alternativa rechazada
 - Hard-delete: pérdida irreversible de datos, imposible auditar reversals
 
----
+### Reemplazo
+- Sustituido por ADR-024. El campo `estado` permanece en los headers y el balance sigue excluyendo filas históricas `estado='anulado'`, pero los endpoints DELETE ya borran físicamente la fila y auditan snapshot previo.
 
 ## ADR-016: Filtros server-side en listados de pagos
 
@@ -561,18 +563,100 @@ El dashboard de Balance necesita responder tanto a un cierre histórico por fech
 | **Cierre de día + carry-forward bancario** | Reproduce el estado al cierre de una fecha y soporta vista "ahora" | Requiere normalización de fechas, snapshots consistentes y reglas claras de fallback |
 
 ### Decisión
-El sistema define el Balance como una fotografía al cierre de una fecha `D`. Si no se envía fecha, se usa la fecha actual en timezone Lima y se interpreta como modo "ahora". Los bancos admin se resuelven por snapshot de cierre con carry-forward del registro más reciente anterior; si no existe snapshot para hoy, se completa con movimientos de hoy del banco admin. Las cajas de agentes se calculan por acumulado de ingresos menos pagos hasta `D`, y el acumulado mensual descuenta `caja_inicio_mes` desde `config_settings`.
+El sistema define el Balance como una fotografía al cierre de una fecha `D`. Si no se envía fecha, se usa la fecha actual en timezone Lima y se interpreta como modo "ahora". Los bancos admin se resuelven por snapshot de cierre con carry-forward del registro más reciente anterior; si no existe snapshot para hoy, se completa con movimientos de hoy del banco admin. Las cajas de agentes se calculan por acumulado de ingresos menos pagos hasta `D`. `cajaDisponible` es bancos admin + cajas de agentes - `caja_inicio_mes`, y el acumulado mensual es bancos admin + cajas de agentes + gastos - `caja_inicio_mes`.
 
 ### Consecuencias
 - El dashboard puede mostrar cierres consistentes y comparables por fecha.
 - El cálculo bancario deja de depender de tener un snapshot perfecto para cada día.
-- `caja_inicio_mes` se convierte en la referencia contable para el acumulado mensual.
+- `caja_inicio_mes` se convierte en la referencia contable para `cajaDisponible` y el acumulado mensual.
 - Las fechas deben normalizarse siempre con la timezone del negocio para evitar desfasajes entre backend y UI.
 
 ### Mitigaciones
 - Centralizar la normalización temporal en `backend/config/timezone.js`.
 - Mantener `config_settings` como fuente única para valores operativos como `caja_inicio_mes`.
 - Excluir siempre registros con `estado='anulado'` para conservar consistencia con el resto del sistema.
+
+---
+
+## ADR-024: Hard delete auditado para movimientos
+
+**Estado**: ✅ Vigente  
+**Fecha**: 2026-05-02
+
+### Contexto
+El negocio cambió la acción operativa de "Anular" por "Eliminar" en pagos, ingresos y gastos. La base sigue siendo Google Sheets y la auditoría debe mantener trazabilidad completa aunque la fila operativa desaparezca.
+
+### Decisión
+`DELETE /api/{pagos,ingresos,gastos}/:id` ejecuta hard delete de la fila en Sheets. Antes del borrado, el servicio lee el registro por id y persiste auditoría `action='delete'` con `changes.before` como snapshot completo sin `_rowIndex`.
+
+### Implementación
+- Los servicios exportan `remove(id, caller)` y ya no `cancel(id, motivo, caller)`.
+- El repository expone `findById(sheetName, id)` y `delete(sheetName, rowIndex)`; `deleteRow()` queda disponible para compatibilidad con config.
+- DELETE conserva `requireAdmin` y ya no requiere body `{ motivo }`.
+- `GET /api/{pagos,ingresos,gastos}/:id` devuelve 404 cuando la fila ya no existe.
+- El balance no cambia su filtro de `estado='anulado'` para mantener compatibilidad con filas históricas.
+
+### Consecuencias
+- Los listados y balances reflejan inmediatamente el borrado físico porque la fila desaparece de la fuente de verdad.
+- La reversión manual requiere reconstruir desde auditoría si se elimina por error.
+- No se realiza cleanup masivo de registros históricos anulados.
+
+---
+
+## ADR-025: Keep-alive y retry/backoff robusto para Railway
+
+**Estado**: ✅ Vigente  
+**Fecha**: 2026-05-02
+
+### Contexto
+Railway hiberna el container cuando no hay tráfico. El primer request tras el cold start puede tardar 15–30 segundos, causando errores de timeout en el frontend y una mala experiencia de usuario.
+
+### Decisión
+Tres capas de mitigación:
+1. **Keep-alive externo**: cron-job.org llama a `GET /api/health` cada 10 minutos para prevenir la hibernación.
+2. **Healthcheck en Railway**: `railway.json` con `healthcheckPath: /api/health` y `healthcheckTimeout: 30`; Dockerfile con `HEALTHCHECK --interval=30s --timeout=5s`.
+3. **Retry/backoff en frontend**: 5 intentos con delays `[250, 500, 1000, 2000, 4000]` ms. El primer request usa `WARMUP_TIMEOUT_MS = 30s`; los siguientes `DEFAULT_TIMEOUT_MS = 15s`. El banner muestra estado `warmup` (amarillo) o `error` (rojo) hasta que el backend responde.
+
+### Implementación
+- `GET /api/health` devuelve `{ status, uptime, timestamp }` sin I/O; excluido del rate-limiter.
+- `hasWarmedUp` flag en `frontend/src/lib/api.ts` discrimina el timeout de warmup.
+- `BackendStatusBanner.tsx` sondea la ruta health con polling rápido (5s) los primeros 60s y lento (20s) después.
+
+### Consecuencias
+- El sistema se mantiene caliente durante el horario de uso con un plan gratuito de cron-job.org.
+- Los usuarios ven feedback claro durante el arranque en lugar de un error genérico.
+- El backend no depende de wake-up automático de Railway; los SLAs son más predecibles.
+
+---
+
+## ADR-026: Detección de pagos duplicados con ventana temporal
+
+**Estado**: ✅ Vigente  
+**Fecha**: 2026-05-02
+
+### Contexto
+Los agentes a veces registran el mismo voucher dos veces (doble clic, refrescar formulario). Necesitamos prevenir duplicados sin bloquear casos legítimos (mismo monto y banco, diferente comprobante).
+
+### Decisión
+Al crear un pago, el backend busca en los últimos N minutos (default 10, configurable con `DUPLICATE_WINDOW_MINUTES`) un pago activo con los mismos cuatro campos: `usuario`, `monto`, `banco_id`, `fecha_comprobante`. Si encuentra uno, devuelve HTTP 409 con `code: DUPLICATE_PAGO` y el snapshot del registro existente. El agente puede forzar el registro enviando el header `X-Confirm-Duplicate: true`.
+
+### Alternativas evaluadas
+| Opción | Pros | Contras |
+|--------|------|---------|
+| Clave única en Sheets | Simple | Sheets no tiene constraints; requiere read-lock manual |
+| Hash del comprobante | Detecta imagen repetida | Distinta foto del mismo voucher no se detecta |
+| **Ventana temporal + 4 campos** | Detecta registros accidentales; permite casos legítimos | O(n) scan; puede generar falso positivo si mismo monto legítimo en minutos |
+
+### Implementación
+- `findDuplicateInWindow()` en `pagos.service.js`: carga todos los pagos activos y filtra; normaliza monto a 2 decimales y fechas a `YYYY-MM-DD`.
+- `DuplicatePagoError` (409) retorna snapshot con id, usuario, monto, banco_id, fecha_comprobante, fecha_registro.
+- Frontend: `DuplicatePagoError` typed class; modal "Posible pago duplicado" con detalles del existente; botón "Registrar de todas formas" pasa `confirmDuplicate: true`.
+- Tests: 7 casos en `pagos-duplicate-detection.test.js`.
+
+### Consecuencias
+- Previene el error más común en operación (doble registro de voucher).
+- El agente retiene control: puede confirmar explícitamente si el duplicado es legítimo.
+- Ventana configurable permite ajustar sensibilidad sin redespliegue.
 
 ---
 
@@ -590,3 +674,5 @@ El sistema define el Balance como una fotografía al cierre de una fecha `D`. Si
 | 2026-04-19 | 005 | Nota de fix post-deploy: OCR fallback robusto frente a credenciales BASE64 (commit `1ef30ee`) |
 | 2026-04-20 | 023 | ADR-023 agregado: Balance con semántica de cierre de día y carry-forward bancario |
 | 2026-04-19 | — | Cierre de Sprint 11: TICKET-055 y TICKET-056 ejecutados; backend en Railway, frontend en Vercel, R2 activo |
+| 2026-05-02 | 015, 024 | ADR-015 superseded; ADR-024 agregado para hard delete auditado en pagos, ingresos y gastos |
+| 2026-05-02 | 025, 026 | ADR-025 keep-alive Railway + retry/backoff frontend; ADR-026 detección de duplicados con ventana temporal |

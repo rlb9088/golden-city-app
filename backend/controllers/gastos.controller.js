@@ -1,4 +1,5 @@
 const gastosService = require('../services/gastos.service');
+const { NotFoundError } = require('../utils/appError');
 
 async function create(req, res) {
   const { record, warnings } = await gastosService.create(req.validatedData, req.auth);
@@ -21,22 +22,35 @@ async function getPagedAndFiltered(req, res) {
   res.json({ status: 'success', data: gastos });
 }
 
+async function getById(req, res) {
+  const { id } = req.params;
+  const gasto = await gastosService.getById(id);
+
+  if (!gasto) {
+    throw new NotFoundError('No se encontró el gasto solicitado.', {
+      context: { id },
+    });
+  }
+
+  res.json({ status: 'success', data: gasto });
+}
+
 async function update(req, res) {
   const { id } = req.params;
   const gasto = await gastosService.update(id, req.validatedData, req.auth);
   res.json({ status: 'success', data: gasto });
 }
 
-async function cancel(req, res) {
+async function remove(req, res) {
   const { id } = req.params;
-  const { motivo } = req.validatedData;
-  const gasto = await gastosService.cancel(id, motivo, req.auth);
+  const gasto = await gastosService.remove(id, req.auth);
   res.json({ status: 'success', data: gasto });
 }
 
 module.exports = {
   create,
   getPagedAndFiltered,
+  getById,
   update,
-  cancel,
+  remove,
 };

@@ -186,8 +186,8 @@ test('getBalanceAt calcula cierre por fecha con carry-forward y excluye anulados
         { categoria: 'Operativo', subcategoria: 'Limpieza', monto: 30 },
       ],
     },
-    balanceDia: 120,
-    balanceAcumulado: 540,
+    cajaDisponible: 570,
+    balanceAcumulado: 600,
     cajaInicioMes: 100,
   });
 });
@@ -259,8 +259,8 @@ test('getBalanceAt sin fecha usa modo ahora y aplica movimientos de hoy si falta
         { categoria: 'Operativo', subcategoria: 'Limpieza', monto: 40 },
       ],
     },
-    balanceDia: 65,
-    balanceAcumulado: 605,
+    cajaDisponible: 645,
+    balanceAcumulado: 685,
     cajaInicioMes: 100,
   });
 });
