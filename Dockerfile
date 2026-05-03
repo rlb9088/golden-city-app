@@ -23,8 +23,7 @@ COPY --from=frontend-build /app/frontend ./frontend
 
 RUN mkdir -p /app/backend/keys
 
-COPY docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+RUN printf '#!/bin/sh\nset -e\n\n_term() {\n  echo "Caught signal, shutting down..."\n  kill -TERM "$BACKEND_PID" 2>/dev/null\n  kill -TERM "$FRONTEND_PID" 2>/dev/null\n}\n\ntrap _term TERM INT\n\ncd /app/backend\necho "Starting backend on port 3001"\nnode index.js &\nBACKEND_PID=$!\n\ncd /app/frontend\necho "Starting frontend on port 3000"\nnpm run start -- --hostname 0.0.0.0 --port 3000 &\nFRONTEND_PID=$!\n\nwait "$BACKEND_PID" "$FRONTEND_PID"\n' > /docker-entrypoint.sh && chmod +x /docker-entrypoint.sh
 
 EXPOSE 3000 3001
 
