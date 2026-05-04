@@ -1,7 +1,7 @@
 # Arquitectura — Golden City Backoffice
 
-> **Versión**: 1.8  
-> **Última actualización**: 2026-05-02
+> **Versión**: 1.12  
+> **Última actualización**: 2026-05-05
 
 ---
 
@@ -181,6 +181,10 @@ backend/
 │   ├── ingresos.routes.js      # POST /, GET /, GET /:id, PUT /:id, DELETE /:id (hard delete)
 │   ├── gastos.routes.js        # POST /, GET /, GET /:id, PUT /:id, DELETE /:id (hard delete)
 │   ├── bancos.routes.js        # POST /, GET /
+│   ├── depositos-totales.routes.js # POST /, GET / (admin-only)
+│   ├── retiros-totales.routes.js   # POST /, GET / (admin-only)
+│   ├── bonos-totales.routes.js     # POST /, GET / (admin-only)
+│   ├── retiros-no-pagados.routes.js # POST /, GET / (admin-only)
 │   ├── balance.routes.js       # GET /, GET /:agente
 │   ├── config.routes.js        # Full CRUD + import + delete
 │   ├── audit.routes.js         # GET / (filtros entity/action/user/desde/hasta)
@@ -192,6 +196,10 @@ backend/
 │   ├── ingresos.controller.js  # create, getAll, update, cancel
 │   ├── gastos.controller.js    # create, getAll, update, cancel
 │   ├── bancos.controller.js    # create, getAll
+│   ├── depositos-totales.controller.js # create, getAll
+│   ├── retiros-totales.controller.js   # create, getAll
+│   ├── bonos-totales.controller.js      # create, getAll
+│   ├── retiros-no-pagados.controller.js # create, getAll
 │   ├── balance.controller.js   # getGlobal, getByAgent
 │   ├── config.controller.js    # getFullConfig, getTable, addToTable, importBatch, removeFromTable
 │   ├── audit.controller.js     # getAuditLogs (filtros + JSON)
@@ -203,7 +211,11 @@ backend/
 │   ├── ingresos.service.js     # CRUD + update + cancel + audit
 │   ├── gastos.service.js       # CRUD + update + cancel + audit
 │   ├── bancos.service.js       # Upsert + audit
-│   ├── balance.service.js      # Cálculo (excluye estado='anulado')
+│   ├── depositos-totales.service.js # Upsert + audit
+│   ├── retiros-totales.service.js   # Upsert + audit
+│   ├── bonos-totales.service.js     # Upsert + audit
+│   ├── retiros-no-pagados.service.js # Upsert + audit
+│   ├── balance.service.js      # Cálculo global, por agente, KPI derivados Sprint 17 y variación de caja
 │   ├── config.service.js       # CRUD + seed + validateReferences + deleteRow
 │   ├── audit.service.js        # Append-only + getFiltered (5 filtros)
 │   └── ocr.service.js          # Pipeline OCR (Vision → Tesseract → Mock)
@@ -281,7 +293,15 @@ Google Sheets API / In-memory store
 | DELETE | `/api/gastos/:id` | Admin | Eliminar gasto (hard delete de fila, audita snapshot `before`) |
 | POST | `/api/bancos` | Admin | Upsert saldo bancario |
 | GET | `/api/bancos` | Auth | Listar saldos bancarios |
-| GET | `/api/balance?fecha=` | Auth | Balance global al cierre de una fecha; vacío = ahora (excluye anulados) |
+| POST | `/api/depositos-totales` | Admin | Upsert de depósitos totales por fecha + caja |
+| GET | `/api/depositos-totales` | Admin | Listado paginado de depósitos totales |
+| POST | `/api/retiros-totales` | Admin | Upsert de retiros totales por fecha + caja |
+| GET | `/api/retiros-totales` | Admin | Listado paginado de retiros totales |
+| POST | `/api/bonos-totales` | Admin | Upsert de bonos totales por fecha + caja |
+| GET | `/api/bonos-totales` | Admin | Listado paginado de bonos totales |
+| POST | `/api/retiros-no-pagados` | Admin | Upsert de retiros no pagados por fecha + caja |
+| GET | `/api/retiros-no-pagados` | Admin | Listado paginado de retiros no pagados |
+| GET | `/api/balance?fecha=` | Auth | Balance global al cierre de una fecha; vacío = ahora (incluye KPIs día/acumulado y variación de caja) |
 | GET | `/api/balance/:agente` | Auth | Balance de un agente (excluye anulados) |
 | GET | `/api/audit` | Admin | Listar auditoría (filtros: entity/action/user/desde/hasta) |
 | POST | `/api/ocr/analyze` | Auth | Analizar imagen con OCR |
@@ -306,7 +326,44 @@ Ver sección 4 del [PRD](./PRD.md) para el modelo completo de hojas y headers.
 
 Además de las hojas operativas, `config_settings` centraliza ajustes singleton del sistema. El caso vigente es `caja_inicio_mes`, usado por el balance acumulado para fijar la caja base de cada mes. Su lectura y actualización se exponen por `/api/config/settings/:key`.
 
-Ver ADR-023 en [docs/decisions.md](./decisions.md) para el detalle de la semántica de cierre de día y carry-forward.
+#### Totales por caja
+
+El patrón de "totales por caja" usa cuatro hojas dedicadas con el mismo shape compartido `TOTALES_POR_CAJA_HEADERS = ['id', 'fecha', 'caja_id', 'caja', 'monto']`:
+
+- `depositos_totales`
+- `retiros_totales`
+- `bonos_totales`
+- `retiros_no_pagados`
+
+Cada módulo aplica UPSERT por la clave `(fecha, caja_id)`, exactamente igual al patrón de `bancos`, manteniendo `caja` como dato denormalizado del nombre al momento del registro.
+
+Los endpoints de escritura y lectura de estos módulos quedan restringidos a admin-only en `POST` y `GET`. El balance los consume como fuentes separadas para construir depositos reales, retiros reales, variacion de caja y detalle por caja.
+
+### 4.2.1 Flujo Sprint 17 extendido
+
+```
+Sheets totales por caja
+  ├── depositos_totales
+  ├── retiros_totales
+  ├── bonos_totales
+  └── retiros_no_pagados
+        ↓
+balance.service.js
+  ├── getDepositosTotalesAt()
+  ├── getRetirosTotalesAt()
+  ├── getBonosTotalesAt()
+  ├── getRetirosNoPagadosAt()
+  ├── getVariacionCajaDia()
+  ├── getVariacionCajaAcumulada()
+  └── buildBalancePorCaja()
+        ↓
+Snapshot de balance
+  ├── bancosAdmin
+  ├── cajasAgentes
+  ├── KPI sprint 17 dia/acumulado
+  ├── variacionCajaDia / variacionCajaAcumulada
+  └── detalle por caja dia / acumulado
+```
 
 ### 4.3 Generación de IDs
 Formato: `{PREFIJO}-{uuid}`
@@ -400,7 +457,9 @@ Frontend (localhost:3000)  →  Backend (localhost:3001)
 | Backend: CRUD ingresos | ✅ Completo | Con auditoría + validación referencial |
 | Backend: CRUD gastos | ✅ Completo | Con auditoría + validación referencial |
 | Backend: saldos bancarios | ✅ Completo | Con upsert + auditoría |
+| Backend: totales por caja | ✅ Completo | Cuatro hojas dedicadas con UPSERT por `(fecha, caja_id)` y admin-only en POST/GET |
 | Backend: balance calculation | ✅ Completo | Global + por agente |
+| Backend: balance Sprint 17 | ✅ Completo | 6 KPI derivados, variación de caja y detalle por caja |
 | Backend: config CRUD | ✅ Completo | CRUD + seed data + deleteRow real + auditoría |
 | Backend: config settings | ✅ Completo | Hoja singleton `config_settings` + endpoint dedicado para `caja_inicio_mes` |
 | Backend: OCR pipeline | ✅ Completo | Vision + Tesseract fallback |
@@ -411,13 +470,15 @@ Frontend (localhost:3000)  →  Backend (localhost:3001)
 | Frontend: design system | ✅ Completo | Dark theme, gold accents, responsive |
 | Frontend: login | ✅ Completo | username/password + JWT almacenado + redirección |
 | Frontend: sidebar + nav | ✅ Completo | Badge rol + logout + hamburger mobile (rol selector eliminado) |
-| Frontend: dashboard balance | ✅ Completo | 5 KPIs + 3 tablas + date picker + skeleton (excluye anulados) |
+| Frontend: dashboard balance | ✅ Completo | 13 KPIs + 5 tablas + date picker + skeleton |
 | Frontend: paginación de listados | ✅ Completo | PaginationControls unificado en pagos, ingresos, gastos, bancos y audit |
 | Frontend: refresh tokens | ✅ Completo | Interceptor de 401 renueva sesión con refresh token |
 | Frontend: formulario pagos | ✅ Completo | Con OCR + validación + skeleton + filtros + eliminar/editar + detección de duplicados |
 | Frontend: formulario ingresos | ✅ Completo | Admin only |
 | Frontend: formulario gastos | ✅ Completo | Con categorías dinámicas |
 | Frontend: formulario bancos | ✅ Completo | Con upsert warning |
+| Frontend: módulos totales por caja | ✅ Completo | 4 páginas dedicadas de admin para depósitos, retiros, bonos y retiros no pagados |
+| Frontend: depósitos totales | ✅ Completo | Admin only, upsert por fecha + caja, tabla paginada |
 | Frontend: configuración | ✅ Completo | CRUD completo con edición e importación masiva |
 | Frontend: auditoría UI | ✅ Completo | Tabla + filtros + JSON expandible (admin only) |
 | Frontend: UX resilience | ✅ Completo | Health polling, retry/backoff 5 intentos (250→4000ms), warmup 30s, banner estados |
@@ -434,6 +495,7 @@ Frontend (localhost:3000)  →  Backend (localhost:3001)
 | Tests | ✅ Completo | 9 suites node:test (152 casos) + E2E contra Sheets real |
 | CI/CD | ✅ Completo | GitHub Actions ejecuta tests backend, lint/build frontend, npm audit y docker build en main |
 | Deploy | ✅ Completo | Dockerfile, entrypoint, .gitignore, .dockerignore y guia de deploy listos |
+| Docs Sprint 17 | ✅ Completo | PRD, architecture, decisions, state y backlog sincronizados con T-093 a T-101 |
 
 ---
 

@@ -1,7 +1,7 @@
 # Decisiones Técnicas — Golden City Backoffice
 
-> **Versión**: 1.8  
-> **Última actualización**: 2026-05-02
+> **Versión**: 1.9  
+> **Última actualización**: 2026-05-05
 
 Este documento registra las decisiones técnicas clave del proyecto, con su contexto, alternativas evaluadas y razón de la elección. Se actualiza conforme evoluciona el proyecto.
 
@@ -660,6 +660,38 @@ Al crear un pago, el backend busca en los últimos N minutos (default 10, config
 
 ---
 
+## ADR-027: Cuatro módulos separados de totales por caja en lugar de un módulo polimórfico
+
+**Estado**: ✅ Vigente  
+**Fecha**: 2026-05-05
+
+### Contexto
+El Sprint 17 introdujo cuatro módulos de totales por caja que deben convivir con una UI separada, auditoría clara y reglas de permisos admin-only. Aunque técnicamente se podría modelar todo en una sola tabla o componente con un campo `tipo`, eso mezclaría responsabilidades y haría más difícil alinear backend, frontend y auditoría.
+
+### Decisión
+Implementar cuatro módulos independientes, tanto en backend como en frontend:
+- Depositos Totales
+- Retiros Totales
+- Bonos Totales
+- Retiros No Pagados
+
+### Razones
+- Alineación con la UI: cada módulo tiene su propia entrada de sidebar y su propia página.
+- Auditoría diferenciada: cada acción en `audit.service` apunta a una entidad clara.
+- Permisos y validaciones específicas pueden divergir en el futuro sin refactor.
+- Simplicidad de schema: cada hoja tiene un único propósito.
+
+### Consecuencias
+- El sistema queda más explícito y fácil de leer para humanos y agentes.
+- Las rutas, controladores y servicios son casi isomórficos, lo que reduce el riesgo de una implementación inconsistente.
+- El balance puede consumir cada fuente por separado para calcular depositos reales, retiros reales, variación de caja y detalle por caja.
+
+### Trade-off aceptado
+- Hay duplicación de código casi 1:1 entre los cuatro módulos.
+- Se mitigó mediante copy-paste guiado y reemplazos mecánicos, priorizando velocidad y consistencia del sprint.
+
+---
+
 ## Registro de Cambios
 
 | Fecha | ADR | Cambio |
@@ -676,3 +708,4 @@ Al crear un pago, el backend busca en los últimos N minutos (default 10, config
 | 2026-04-19 | — | Cierre de Sprint 11: TICKET-055 y TICKET-056 ejecutados; backend en Railway, frontend en Vercel, R2 activo |
 | 2026-05-02 | 015, 024 | ADR-015 superseded; ADR-024 agregado para hard delete auditado en pagos, ingresos y gastos |
 | 2026-05-02 | 025, 026 | ADR-025 keep-alive Railway + retry/backoff frontend; ADR-026 detección de duplicados con ventana temporal |
+| 2026-05-05 | 027 | ADR-027 agregado: cuatro módulos separados de totales por caja para Sprint 17 |

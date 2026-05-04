@@ -1,0 +1,33 @@
+{
+  "event": {
+    "action": "update",
+    "entity": "ticket:TICKET-101-documentacion-sprint-17",
+    "user": "codex",
+    "timestamp": "2026-05-05T00:30:27+02:00",
+    "changes": {
+      "summary": "Closed Sprint 17 documentation and synchronized the living repository docs with the final implementation state.",
+      "docs": [
+        "docs/PRD.md",
+        "docs/architecture.md",
+        "docs/decisions.md",
+        "context/memory/state.md",
+        "tasks/BACKLOG.md"
+      ],
+      "details": [
+        "Bumped PRD to v1.3 and documented the Sprint 17 balance indicators plus the four totales por caja modules.",
+        "Bumped architecture to v1.12, added the four new sheets/routes/services/controllers and the Sprint 17 extended balance flow.",
+        "Added ADR-027 for the four-module design instead of a polymorphic module.",
+        "Closed Sprint 17 in state.md and backlog.md so downstream agents can trust the repository index.",
+        "Recorded validation results: backend npm test (176/176), frontend npm run typecheck, frontend npm run lint, frontend npm run build."
+      ],
+      "status": {
+        "ticket": "COMPLETADO",
+        "sprint": "CERRADO",
+        "commit": "pending-final-recording"
+      }
+    }
+  },
+  "log": {
+    "status": "stored"
+  }
+}

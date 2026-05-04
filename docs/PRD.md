@@ -1,7 +1,7 @@
 # PRD — Golden City Backoffice MVP
 
-> **Versión**: 1.2  
-> **Última actualización**: 2026-04-20  
+> **Versión**: 1.3  
+> **Última actualización**: 2026-05-05  
 > **Estado**: En desarrollo activo
 
 ---
@@ -122,7 +122,7 @@ Los "usuarios" dentro del contexto de pagos son los **jugadores** que reciben di
 - `caja_inicio_mes` se lee desde `config_settings` y actúa como la caja base del acumulado mensual.
 - Ver ADR-023 en [docs/decisions.md](./decisions.md) para la semántica contable completa.
 
-**Fórmulas**:
+**Fórmulas base**:
 ```text
 BancosAdmin(D) = suma de saldos de bancos admin al cierre de D
 CajasAgentes(D) = suma(ingresos <= D) - suma(pagos <= D)
@@ -131,11 +131,30 @@ CajaDisponible(D) = BancosAdmin(D) + CajasAgentes(D) - caja_inicio_mes
 BalanceAcumulado(D) = BancosAdmin(D) + CajasAgentes(D) + TotalGastos(D) - caja_inicio_mes
 ```
 
+**Indicadores derivados Sprint 17**:
+- Depositos reales dia y acumulado.
+- Retiros reales dia y acumulado.
+- Balance de ingresos dia y acumulado.
+
+**Variacion de caja Sprint 17**:
+```text
+VariacionCajaDia(D) = (BancosAdmin(D) - BancosAdmin(D-1)) + (CajasAgentes(D) - CajasAgentes(D-1)) - ((DepositosRealesDia(D) - RetirosRealesDia(D)) - TotalGastosDia(D))
+VariacionCajaAcumulada(D) = suma(VariacionCajaDia desde la primera fecha con datos hasta D)
+```
+
+**Cuadros de detalle por caja**:
+- BalancePorCajaDia(D) agrupa depositos, retiros, bonos y retiros no pagados por caja.
+- BalancePorCajaAcumulado(D) repite el agrupado con el acumulado historico.
+- Las cajas huérfanas se conservan marcadas para auditar diferencias contra `config_cajas`.
+
 **Vistas**:
 - 5 cards de resumen: Bancos admin, Cajas de agentes, Total gastos, Caja disponible, Balance acumulado.
+- 6 cards Sprint 17: depositos reales, retiros reales y balance ingresos en version dia y acumulado.
+- 2 cards Sprint 17: variacion de caja dia y acumulada.
 - Tabla: Balance por agente con sus bancos desglosados.
 - Tabla: Balance por banco admin.
-- Tabla: Balance por categoría y subcategoría de gasto.
+- Tabla: Balance por categoria y subcategoria de gasto.
+- 2 cuadros de detalle por caja: dia y acumulado.
 - Cada tabla debe tener empty state propio cuando no haya datos.
 
 **Estado**: ✅ Implementado
@@ -144,7 +163,27 @@ BalanceAcumulado(D) = BancosAdmin(D) + CajasAgentes(D) + TotalGastos(D) - caja_i
 
 La ruta `/balance` muestra dos vistas segun el rol: admin ve el dashboard global y agente ve "Mi Caja" personal.
 
-### 3.6 OCR de Comprobantes
+### 3.6 Totales por caja
+**Propósito**: Cuatro módulos independientes para capturar movimientos agregados por caja con UPSERT por `(fecha, caja_id)`.
+
+**Módulos**:
+- `Depositos Totales` - suma de depositos reales por caja.
+- `Retiros Totales` - suma de retiros por caja.
+- `Bonos Totales` - descuentos de bonos por caja.
+- `Retiros No Pagados` - ajustes de retiros no pagados por caja.
+
+**Reglas comunes**:
+- Cada módulo tiene su propia pagina, su propia entrada de sidebar y su propio sheet.
+- El patron de persistencia es `UPSERT` por `(fecha, caja_id)`, igual que `bancos`.
+- POST y GET son admin-only.
+- El shape compartido es `id, fecha, caja_id, caja, monto`.
+- Los datos se usan luego en Balance para construir depositos reales, retiros reales y los cuadros por caja.
+
+**Estado**: ✅ Implementado
+
+---
+
+### 3.7 OCR de Comprobantes
 **Propósito**: Extraer automáticamente monto y fecha de imágenes de vouchers/comprobantes bancarios.
 
 **Flujos de provisión de imagen**:
@@ -170,7 +209,7 @@ La ruta `/balance` muestra dos vistas segun el rol: admin ve el dashboard global
 
 ---
 
-### 3.7 Configuración Admin
+### 3.8 Configuración Admin
 **Propósito**: CRUD de las tablas de configuración que alimentan los selects del sistema.
 
 **Tablas configurables**:
@@ -195,7 +234,7 @@ La ruta `/balance` muestra dos vistas segun el rol: admin ve el dashboard global
 
 ---
 
-### 3.8 Auditoría (Audit Trail)
+### 3.9 Auditoría (Audit Trail)
 **Propósito**: Registrar toda mutación en el sistema de forma inmutable.
 
 **Campos de auditoría**:
@@ -214,7 +253,7 @@ La ruta `/balance` muestra dos vistas segun el rol: admin ve el dashboard global
 
 ---
 
-### 3.9 Permisos y Autenticación
+### 3.10 Permisos y Autenticación
 **Propósito**: Controlar acceso por rol.
 
 **Implementación actual** (MVP):
@@ -242,6 +281,10 @@ Cada "tabla" es una hoja (sheet) dentro de un mismo spreadsheet:
 | `ingresos` | id, agente, banco, monto, fecha_movimiento, fecha_registro |
 | `gastos` | id, fecha_gasto, fecha_registro, concepto, categoria, subcategoria, banco, monto |
 | `bancos` | id, fecha, banco, saldo |
+| `depositos_totales` | id, fecha, caja_id, caja, monto |
+| `retiros_totales` | id, fecha, caja_id, caja, monto |
+| `bonos_totales` | id, fecha, caja_id, caja, monto |
+| `retiros_no_pagados` | id, fecha, caja_id, caja, monto |
 | `audit` | id, action, entity, user, timestamp, changes |
 | `config_agentes` | id, nombre |
 | `config_categorias` | id, categoria, subcategoria |
