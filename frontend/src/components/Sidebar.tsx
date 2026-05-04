@@ -12,6 +12,10 @@ const navItems = [
   { href: '/ingresos', label: 'Ingresos', icon: '💰', adminOnly: true },
   { href: '/gastos', label: 'Gastos', icon: '📤', adminOnly: true },
   { href: '/bancos', label: 'Bancos', icon: '🏦', adminOnly: true },
+  { href: '/depositos-totales', label: 'Depósitos Totales', icon: '💵', adminOnly: true },
+  { href: '/bonos-totales', label: 'Bonos Totales', icon: '🎁', adminOnly: true },
+  { href: '/retiros-totales', label: 'Retiros Totales', icon: '💸', adminOnly: true },
+  { href: '/retiros-no-pagados', label: 'Retiros No Pagados', icon: '⛔', adminOnly: true },
   { href: '/configuracion', label: 'Configuración', icon: '⚙️', adminOnly: true },
   { href: '/audit', label: 'Auditoría', icon: '🧾', adminOnly: true },
 ];

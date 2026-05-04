@@ -344,7 +344,11 @@ async function ensureSheetsExist(sheets, spreadsheetId) {
 
 async function writeHeaders(sheets, spreadsheetId) {
   for (const sheet of SHEETS_SCHEMA) {
-    await alignSheetSchema(sheets, spreadsheetId, sheet.name, sheet.headers);
+    const alignment = await alignSheetSchema(sheets, spreadsheetId, sheet.name, sheet.headers);
+    if (alignment.status === 'already_aligned') {
+      continue;
+    }
+
     const endColumn = toColumnLetter(sheet.headers.length);
     await sheets.spreadsheets.values.update({
       spreadsheetId,
@@ -577,31 +581,37 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error('[SheetsSetup] Error:', error.message);
-  if (error.response?.data) {
-    console.error('[SheetsSetup] Error details:', JSON.stringify(error.response.data));
-  }
-  if (
-    error.response?.data?.error?.code === 403 &&
-    (!process.env.GOOGLE_SHEET_ID || !process.env.GOOGLE_SHEET_ID.trim())
-  ) {
-    console.error('[SheetsSetup] Fallback required: create the spreadsheet manually in Google Sheets, share it with the service account as Editor, and set GOOGLE_SHEET_ID in backend/.env.');
-  }
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error('[SheetsSetup] Error:', error.message);
+    if (error.response?.data) {
+      console.error('[SheetsSetup] Error details:', JSON.stringify(error.response.data));
+    }
+    if (
+      error.response?.data?.error?.code === 403 &&
+      (!process.env.GOOGLE_SHEET_ID || !process.env.GOOGLE_SHEET_ID.trim())
+    ) {
+      console.error('[SheetsSetup] Fallback required: create the spreadsheet manually in Google Sheets, share it with the service account as Editor, and set GOOGLE_SHEET_ID in backend/.env.');
+    }
+    process.exitCode = 1;
+  });
+}
 
 module.exports = {
   alignSheetSchema,
   detectSingleMissingHeaderIndex,
+  ensureSheetsExist,
   getSheetIdByName,
   insertColumnsBefore,
   isExactHeaderMatch,
   backfillConfigBancosOwnerIds,
+  main,
   normalizeLookup,
   normalizeNameKey,
   normalizeText,
   getFirstDayOfCurrentMonthLima,
   seedConfigSettings,
   seedBankCajaInicioMesSettings,
+  verifyHeaders,
+  writeHeaders,
 };

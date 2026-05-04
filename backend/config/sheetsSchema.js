@@ -16,6 +16,22 @@ const SHEETS_SCHEMA = [
     headers: ['id', 'fecha', 'banco_id', 'banco', 'saldo'],
   },
   {
+    name: 'depositos_totales',
+    headers: ['id', 'fecha', 'caja_id', 'caja', 'monto'],
+  },
+  {
+    name: 'retiros_totales',
+    headers: ['id', 'fecha', 'caja_id', 'caja', 'monto'],
+  },
+  {
+    name: 'bonos_totales',
+    headers: ['id', 'fecha', 'caja_id', 'caja', 'monto'],
+  },
+  {
+    name: 'retiros_no_pagados',
+    headers: ['id', 'fecha', 'caja_id', 'caja', 'monto'],
+  },
+  {
     name: 'audit',
     headers: ['id', 'action', 'entity', 'user', 'timestamp', 'changes'],
   },
@@ -49,6 +65,8 @@ const SHEETS_SCHEMA = [
   },
 ];
 
+const TOTALES_POR_CAJA_HEADERS = ['id', 'fecha', 'caja_id', 'caja', 'monto'];
+
 const DEPRECATED_SHEETS_SCHEMA = [
   {
     name: 'config_auth_users',
@@ -69,4 +87,5 @@ module.exports = {
   DEPRECATED_SHEETS_SCHEMA_MAP,
   SHEETS_SCHEMA,
   SHEETS_SCHEMA_MAP,
+  TOTALES_POR_CAJA_HEADERS,
 };

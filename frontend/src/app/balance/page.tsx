@@ -7,6 +7,7 @@ import {
   getSetting,
   isNetworkError,
   type ConfigSetting,
+  type BalanceCajaDetail,
   type BalanceAgentDetail,
   type BalanceBankDetail,
   type BalanceExpenseDetail,
@@ -79,6 +80,10 @@ function getKpiVariant(value: number, fallback: 'neutral' | 'positive' | 'negati
   if (value > 0) return 'positive';
   if (value < 0) return 'negative';
   return fallback;
+}
+
+function getNonNegativeVariant(value: number) {
+  return value >= 0 ? 'positive' : 'negative';
 }
 
 function EmptyState({ icon, message }: { icon: string; message: string }) {
@@ -161,6 +166,83 @@ function ExpenseBreakdownTable({ group }: { group: ExpenseGroup }) {
             </tr>
           ))}
         </tbody>
+      </table>
+    </div>
+  );
+}
+
+function CajaBalanceTable({ rows }: { rows: BalanceCajaDetail[] }) {
+  if (rows.length === 0) {
+    return <p className="balance-details-empty">No hay cajas para mostrar en este cierre.</p>;
+  }
+
+  const totals = rows.reduce((acc, row) => ({
+    depositoReal: acc.depositoReal + row.depositoReal,
+    retiroReal: acc.retiroReal + row.retiroReal,
+    balance: acc.balance + row.balance,
+  }), {
+    depositoReal: 0,
+    retiroReal: 0,
+    balance: 0,
+  });
+
+  return (
+    <div className="table-container balance-nested-table-container">
+      <table className="table balance-nested-table balance-caja-table">
+        <thead>
+          <tr>
+            <th>Caja</th>
+            <th style={{ textAlign: 'right' }}>Depósito real</th>
+            <th style={{ textAlign: 'right' }}>Retiro real</th>
+            <th style={{ textAlign: 'right' }}>Balance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={`${row.caja_id}-${row._orphan ? 'orphan' : 'config'}`}>
+              <td>
+                <div className="balance-caja-cell">
+                  <span className="balance-caja-name">{row.caja}</span>
+                  {row._orphan && (
+                    <span
+                      className="badge badge-blue balance-caja-orphan"
+                      title="Esta caja sigue apareciendo en las hojas historicas, pero ya no existe en config_cajas."
+                    >
+                      caja eliminada
+                    </span>
+                  )}
+                </div>
+              </td>
+              <td className="text-right">
+                <span className="amount amount-positive">{formatCurrency(row.depositoReal)}</span>
+              </td>
+              <td className="text-right">
+                <span className="amount amount-negative">{formatCurrency(row.retiroReal)}</span>
+              </td>
+              <td className="text-right">
+                <span className={`amount ${getVariantByAmount(row.balance) === 'negative' ? 'amount-negative' : 'amount-positive'}`}>
+                  {formatCurrency(row.balance)}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th>Total</th>
+            <th className="text-right">
+              <span className="amount amount-positive">{formatCurrency(totals.depositoReal)}</span>
+            </th>
+            <th className="text-right">
+              <span className="amount amount-negative">{formatCurrency(totals.retiroReal)}</span>
+            </th>
+            <th className="text-right">
+              <span className={`amount ${getVariantByAmount(totals.balance) === 'negative' ? 'amount-negative' : 'amount-positive'}`}>
+                {formatCurrency(totals.balance)}
+              </span>
+            </th>
+          </tr>
+        </tfoot>
       </table>
     </div>
   );
@@ -252,6 +334,81 @@ export default function BalancePage() {
             <div key={item} className="stats-card skeleton-card" />
           ))}
         </div>
+        <div className="balance-kpi-sections">
+          <section className="balance-kpi-section">
+            <div className="balance-section-header">
+              <div>
+                <h2 className="balance-section-title">Del dia seleccionado</h2>
+                <p className="page-subtitle">Depósitos reales, retiros reales y balance de ingresos.</p>
+              </div>
+            </div>
+            <div className="balance-stats balance-stats-extended stagger-children">
+              {[1, 2, 3].map((item) => (
+                <div key={`day-${item}`} className="stats-card skeleton-card" />
+              ))}
+            </div>
+          </section>
+          <section className="balance-kpi-section balance-kpi-section--accent">
+            <div className="balance-section-header">
+              <div>
+                <h2 className="balance-section-title">Acumulado hasta el dia</h2>
+                <p className="page-subtitle">Depósitos reales, retiros reales y balance de ingresos acumulado.</p>
+              </div>
+            </div>
+            <div className="balance-stats balance-stats-extended stagger-children">
+              {[1, 2, 3].map((item) => (
+                <div key={`acc-${item}`} className="stats-card skeleton-card" />
+              ))}
+            </div>
+          </section>
+        </div>
+        <section className="balance-kpi-section balance-kpi-section--variacion">
+          <div className="balance-section-header">
+            <div>
+              <h2 className="balance-section-title">Variacion de caja</h2>
+              <p className="page-subtitle">Mide el cuadre entre el cambio en saldos y las operaciones registradas.</p>
+            </div>
+            <span className="badge badge-blue">2 KPI</span>
+          </div>
+          <div className="balance-stats balance-stats-extended stagger-children">
+            <StatsCard
+              icon="📉"
+              label="Variacion de caja del dia"
+              value={0}
+              variant="neutral"
+              subtitle="Pendiente de carga"
+            />
+            <StatsCard
+              icon="📊"
+              label="Variacion de caja acumulada"
+              value={0}
+              variant="neutral"
+              subtitle="Pendiente de carga"
+            />
+          </div>
+        </section>
+        <div className="balance-sections">
+          <div className="balance-section animate-fade-in">
+            <div className="balance-section-header">
+              <div>
+                <h2 className="balance-section-title">Balance de ingresos del dia por caja</h2>
+                <p className="page-subtitle">Depósito real, retiro real y balance por cada caja configurada.</p>
+              </div>
+              <span className="badge badge-blue">0 caja(s)</span>
+            </div>
+            <TableSkeleton columns={4} rows={4} />
+          </div>
+          <div className="balance-section animate-fade-in">
+            <div className="balance-section-header">
+              <div>
+                <h2 className="balance-section-title">Balance de ingresos acumulado por caja</h2>
+                <p className="page-subtitle">Mismo corte pero con snapshots acumulados hasta la fecha.</p>
+              </div>
+              <span className="badge badge-blue">0 caja(s)</span>
+            </div>
+            <TableSkeleton columns={4} rows={4} />
+          </div>
+        </div>
         <div className="balance-sections">
           <div className="balance-section balance-section--wide">
             <h2 className="balance-section-title">Balance por Agente</h2>
@@ -287,6 +444,70 @@ export default function BalancePage() {
           {[1, 2, 3, 4, 5].map((item) => (
             <div key={item} className="stats-card skeleton-card" />
           ))}
+        </div>
+        <div className="balance-kpi-sections">
+          <section className="balance-kpi-section">
+            <div className="balance-section-header">
+              <div>
+                <h2 className="balance-section-title">Del dia seleccionado</h2>
+                <p className="page-subtitle">Depósitos reales, retiros reales y balance de ingresos.</p>
+              </div>
+            </div>
+            <div className="balance-stats balance-stats-extended stagger-children">
+              {[1, 2, 3].map((item) => (
+                <div key={`day-${item}`} className="stats-card skeleton-card" />
+              ))}
+            </div>
+          </section>
+          <section className="balance-kpi-section balance-kpi-section--accent">
+            <div className="balance-section-header">
+              <div>
+                <h2 className="balance-section-title">Acumulado hasta el dia</h2>
+                <p className="page-subtitle">Depósitos reales, retiros reales y balance de ingresos acumulado.</p>
+              </div>
+            </div>
+            <div className="balance-stats balance-stats-extended stagger-children">
+              {[1, 2, 3].map((item) => (
+                <div key={`acc-${item}`} className="stats-card skeleton-card" />
+              ))}
+            </div>
+          </section>
+        </div>
+        <section className="balance-kpi-section balance-kpi-section--variacion">
+          <div className="balance-section-header">
+            <div>
+              <h2 className="balance-section-title">Variacion de caja</h2>
+              <p className="page-subtitle">Mide el cuadre entre el cambio en saldos y las operaciones registradas.</p>
+            </div>
+            <span className="badge badge-blue">2 KPI</span>
+          </div>
+          <div className="balance-stats balance-stats-extended stagger-children">
+            {[1, 2].map((item) => (
+              <div key={`variacion-${item}`} className="stats-card skeleton-card" />
+            ))}
+          </div>
+        </section>
+        <div className="balance-sections">
+          <div className="balance-section animate-fade-in">
+            <div className="balance-section-header">
+              <div>
+                <h2 className="balance-section-title">Balance de ingresos del dia por caja</h2>
+                <p className="page-subtitle">Depósito real, retiro real y balance por cada caja configurada.</p>
+              </div>
+              <span className="badge badge-blue">0 caja(s)</span>
+            </div>
+            <TableSkeleton columns={4} rows={4} />
+          </div>
+          <div className="balance-section animate-fade-in">
+            <div className="balance-section-header">
+              <div>
+                <h2 className="balance-section-title">Balance de ingresos acumulado por caja</h2>
+                <p className="page-subtitle">Mismo corte pero con snapshots acumulados hasta la fecha.</p>
+              </div>
+              <span className="badge badge-blue">0 caja(s)</span>
+            </div>
+            <TableSkeleton columns={4} rows={4} />
+          </div>
         </div>
         <div className="balance-sections">
           <div className="balance-section balance-section--wide">
@@ -418,7 +639,122 @@ export default function BalancePage() {
         />
       </div>
 
+      <div className="balance-kpi-sections">
+        <section className="balance-kpi-section">
+          <div className="balance-section-header">
+            <div>
+              <h2 className="balance-section-title">Del dia seleccionado</h2>
+              <p className="page-subtitle">Depósitos reales, retiros reales y balance de ingresos.</p>
+            </div>
+            <span className="badge badge-blue">3 KPI</span>
+          </div>
+          <div className="balance-stats balance-stats-extended stagger-children">
+            <StatsCard
+              icon="💰"
+              label="Depósitos reales del dia"
+              value={balance.depositosRealesDia}
+              variant="positive"
+              subtitle={`${formatCurrency(balance.depositosDia?.total ?? balance.depositosRealesDia)} - ${formatCurrency(balance.bonosDia?.total ?? 0)}`}
+            />
+            <StatsCard
+              icon="🏧"
+              label="Retiros reales del dia"
+              value={balance.retirosRealesDia}
+              variant="negative"
+              subtitle={`${formatCurrency(balance.retirosDia?.total ?? balance.retirosRealesDia)} - ${formatCurrency(balance.retirosNoPagadosDia?.total ?? 0)}`}
+            />
+            <StatsCard
+              icon="⚖️"
+              label="Balance de ingresos del dia"
+              value={balance.balanceIngresosDia}
+              variant={getKpiVariant(balance.balanceIngresosDia, 'neutral')}
+              subtitle="Depósitos reales - retiros reales"
+            />
+          </div>
+        </section>
+
+        <section className="balance-kpi-section balance-kpi-section--accent">
+          <div className="balance-section-header">
+            <div>
+              <h2 className="balance-section-title">Acumulado hasta el dia</h2>
+              <p className="page-subtitle">Depósitos reales, retiros reales y balance de ingresos acumulado.</p>
+            </div>
+            <span className="badge badge-blue">3 KPI</span>
+          </div>
+          <div className="balance-stats balance-stats-extended stagger-children">
+            <StatsCard
+              icon="💰"
+              label="Depósitos reales acumulados"
+              value={balance.depositosRealesAcumulado}
+              variant="positive"
+              subtitle={`${formatCurrency(balance.depositosAcum?.total ?? balance.depositosRealesAcumulado)} - ${formatCurrency(balance.bonosAcum?.total ?? 0)}`}
+            />
+            <StatsCard
+              icon="🏧"
+              label="Retiros reales acumulados"
+              value={balance.retirosRealesAcumulado}
+              variant="negative"
+              subtitle={`${formatCurrency(balance.retirosAcum?.total ?? balance.retirosRealesAcumulado)} - ${formatCurrency(balance.retirosNoPagadosAcum?.total ?? 0)}`}
+            />
+            <StatsCard
+              icon="📈"
+              label="Balance de ingresos acumulado"
+              value={balance.balanceIngresosAcumulado}
+              variant={getKpiVariant(balance.balanceIngresosAcumulado, 'neutral')}
+              subtitle="Depósitos reales acumulados - retiros reales acumulados"
+            />
+          </div>
+        </section>
+      </div>
+      <section className="balance-kpi-section balance-kpi-section--variacion">
+        <div className="balance-section-header">
+          <div>
+            <h2 className="balance-section-title">Variacion de caja</h2>
+            <p className="page-subtitle">Mide el cuadre entre el cambio en saldos y las operaciones registradas.</p>
+          </div>
+          <span className="badge badge-blue">2 KPI</span>
+        </div>
+        <div className="balance-stats balance-stats-extended stagger-children">
+          <StatsCard
+            icon="📉"
+            label="Variacion de caja del dia"
+            value={balance.variacionCajaDia}
+            variant={getNonNegativeVariant(balance.variacionCajaDia)}
+            subtitle="Cambio observado en saldos vs operaciones netas del dia"
+          />
+          <StatsCard
+            icon="📊"
+            label="Variacion de caja acumulada"
+            value={balance.variacionCajaAcumulada}
+            variant={getNonNegativeVariant(balance.variacionCajaAcumulada)}
+            subtitle="Suma de variaciones diarias desde la primera fecha con datos"
+          />
+        </div>
+      </section>
+
       <div className="balance-sections">
+        <section className="balance-section animate-fade-in">
+          <div className="balance-section-header">
+            <div>
+              <h2 className="balance-section-title">Balance de ingresos del dia por caja</h2>
+              <p className="page-subtitle">Depósito real, retiro real y balance por cada caja configurada.</p>
+            </div>
+            <span className="badge badge-blue">{balance.balanceIngresosDiaPorCaja.length} caja(s)</span>
+          </div>
+          <CajaBalanceTable rows={balance.balanceIngresosDiaPorCaja} />
+        </section>
+
+        <section className="balance-section animate-fade-in">
+          <div className="balance-section-header">
+            <div>
+              <h2 className="balance-section-title">Balance de ingresos acumulado por caja</h2>
+              <p className="page-subtitle">Mismo corte pero con snapshots acumulados hasta la fecha.</p>
+            </div>
+            <span className="badge badge-blue">{balance.balanceIngresosAcumuladoPorCaja.length} caja(s)</span>
+          </div>
+          <CajaBalanceTable rows={balance.balanceIngresosAcumuladoPorCaja} />
+        </section>
+
         <section className="balance-section balance-section--wide animate-fade-in">
           <div className="balance-section-header">
             <div>

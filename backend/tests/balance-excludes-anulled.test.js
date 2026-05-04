@@ -15,6 +15,10 @@ function loadBalanceService({
   const ingresosPath = require.resolve('../services/ingresos.service');
   const pagosPath = require.resolve('../services/pagos.service');
   const gastosPath = require.resolve('../services/gastos.service');
+  const depositosTotalesPath = require.resolve('../services/depositos-totales.service');
+  const retirosTotalesPath = require.resolve('../services/retiros-totales.service');
+  const bonosTotalesPath = require.resolve('../services/bonos-totales.service');
+  const retirosNoPagadosPath = require.resolve('../services/retiros-no-pagados.service');
   const bancosPath = require.resolve('../services/bancos.service');
   const configPath = require.resolve('../services/config.service');
   const timezonePath = require.resolve('../config/timezone');
@@ -23,6 +27,10 @@ function loadBalanceService({
   delete require.cache[ingresosPath];
   delete require.cache[pagosPath];
   delete require.cache[gastosPath];
+  delete require.cache[depositosTotalesPath];
+  delete require.cache[retirosTotalesPath];
+  delete require.cache[bonosTotalesPath];
+  delete require.cache[retirosNoPagadosPath];
   delete require.cache[bancosPath];
   delete require.cache[configPath];
   delete require.cache[timezonePath];
@@ -53,6 +61,42 @@ function loadBalanceService({
     loaded: true,
     exports: {
       getAll: async () => gastos,
+    },
+  };
+
+  require.cache[depositosTotalesPath] = {
+    id: depositosTotalesPath,
+    filename: depositosTotalesPath,
+    loaded: true,
+    exports: {
+      getAll: async () => [],
+    },
+  };
+
+  require.cache[retirosTotalesPath] = {
+    id: retirosTotalesPath,
+    filename: retirosTotalesPath,
+    loaded: true,
+    exports: {
+      getAll: async () => [],
+    },
+  };
+
+  require.cache[bonosTotalesPath] = {
+    id: bonosTotalesPath,
+    filename: bonosTotalesPath,
+    loaded: true,
+    exports: {
+      getAll: async () => [],
+    },
+  };
+
+  require.cache[retirosNoPagadosPath] = {
+    id: retirosNoPagadosPath,
+    filename: retirosNoPagadosPath,
+    loaded: true,
+    exports: {
+      getAll: async () => [],
     },
   };
 

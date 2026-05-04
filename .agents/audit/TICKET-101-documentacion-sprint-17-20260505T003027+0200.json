@@ -23,7 +23,8 @@
       "status": {
         "ticket": "COMPLETADO",
         "sprint": "CERRADO",
-        "commit": "pending-final-recording"
+        "commit": "03494a5",
+        "push": "origin/main"
       }
     }
   },

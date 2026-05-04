@@ -2,6 +2,10 @@ const ingresosService = require('./ingresos.service');
 const pagosService = require('./pagos.service');
 const gastosService = require('./gastos.service');
 const bancosService = require('./bancos.service');
+const depositosTotalesService = require('./depositos-totales.service');
+const retirosTotalesService = require('./retiros-totales.service');
+const bonosTotalesService = require('./bonos-totales.service');
+const retirosNoPagadosService = require('./retiros-no-pagados.service');
 const { getTable, getAdminBankIds, getAgentBankIds, getSetting, getCajaInicioMesByBanco } = require('./config.service');
 const { todayLima } = require('../config/timezone');
 
@@ -47,9 +51,69 @@ function subtractOneDay(dateStr) {
   return parsed.toISOString().slice(0, 10);
 }
 
+const previousDay = subtractOneDay;
+
+function nextDay(dateStr) {
+  const normalized = normalizeDateOnly(dateStr);
+  if (!normalized) {
+    return '';
+  }
+
+  const parsed = new Date(`${normalized}T00:00:00-05:00`);
+  if (Number.isNaN(parsed.getTime())) {
+    return '';
+  }
+
+  parsed.setDate(parsed.getDate() + 1);
+  return parsed.toISOString().slice(0, 10);
+}
+
 function parseAmount(value) {
   const amount = Number.parseFloat(String(value ?? 0));
   return Number.isFinite(amount) ? amount : 0;
+}
+
+function getContextCache(context) {
+  if (!context || typeof context !== 'object') {
+    return null;
+  }
+
+  if (!context.__balanceCache) {
+    Object.defineProperty(context, '__balanceCache', {
+      value: new Map(),
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
+  }
+
+  return context.__balanceCache;
+}
+
+async function memoizeContext(context, key, factory) {
+  const cache = getContextCache(context);
+  if (!cache) {
+    return factory();
+  }
+
+  if (cache.has(key)) {
+    return cache.get(key);
+  }
+
+  const promise = Promise.resolve()
+    .then(factory)
+    .catch((error) => {
+      cache.delete(key);
+      throw error;
+    });
+
+  cache.set(key, promise);
+  return promise;
+}
+
+async function getCachedSheetRows(context, key, loader) {
+  const ctx = context || await loadBalanceContext();
+  return memoizeContext(ctx, `sheet_rows:${key}`, loader);
 }
 
 function isActivo(record) {
@@ -100,12 +164,12 @@ function sortByCategory(a, b) {
     || String(a.subcategoria ?? '').localeCompare(String(b.subcategoria ?? ''), 'es', { sensitivity: 'base' });
 }
 
-function findLatestSnapshot(rows, bancoId, targetDate) {
-  const targetKey = normalizeLookup(bancoId);
+function findLatestSnapshot(rows, targetValue, targetDate, fieldName = 'banco_id') {
+  const targetKey = normalizeLookup(targetValue);
   let latest = null;
 
   for (const row of rows) {
-    if (normalizeLookup(row?.banco_id) !== targetKey) {
+    if (normalizeLookup(row?.[fieldName]) !== targetKey) {
       continue;
     }
 
@@ -131,10 +195,10 @@ function findLatestSnapshot(rows, bancoId, targetDate) {
   return latest?.row || null;
 }
 
-function hasExactSnapshot(rows, bancoId, exactDate) {
-  const targetKey = normalizeLookup(bancoId);
+function hasExactSnapshot(rows, targetValue, exactDate, fieldName = 'banco_id') {
+  const targetKey = normalizeLookup(targetValue);
   return rows.some((row) => (
-    normalizeLookup(row?.banco_id) === targetKey
+    normalizeLookup(row?.[fieldName]) === targetKey
     && getRecordDate(row, 'fecha') === exactDate
   ));
 }
@@ -151,6 +215,229 @@ function isAllowedBankId(bankId, allowedBankIds) {
   }
 
   return allowedBankIds.has(normalizeLookup(bankId));
+}
+
+function buildLatestTotalsByCaja(rows, targetDate, { exactDate = false } = {}) {
+  const latestByCaja = new Map();
+
+  for (const row of rows) {
+    if (!isActivo(row)) {
+      continue;
+    }
+
+    const rowDate = getRecordDate(row, 'fecha');
+    if (!rowDate) {
+      continue;
+    }
+
+    if (exactDate ? rowDate !== targetDate : rowDate > targetDate) {
+      continue;
+    }
+
+    const cajaId = normalizeLookup(row.caja_id);
+    if (!cajaId) {
+      continue;
+    }
+
+    const current = latestByCaja.get(cajaId);
+    const rowIndex = Number(row?._rowIndex ?? 0);
+
+    if (
+      !current
+      || rowDate > current.rowDate
+      || (rowDate === current.rowDate && rowIndex > current.rowIndex)
+    ) {
+      latestByCaja.set(cajaId, {
+        row,
+        rowDate,
+        rowIndex,
+      });
+    }
+  }
+
+  const detalle = [...latestByCaja.values()]
+    .map(({ row }) => ({
+      caja_id: normalizeText(row.caja_id),
+      caja: normalizeText(row.caja) || normalizeText(row.caja_id),
+      monto: parseAmount(row.monto),
+    }))
+    .sort((a, b) => String(a.caja ?? '').localeCompare(String(b.caja ?? ''), 'es', { sensitivity: 'base' })
+      || String(a.caja_id ?? '').localeCompare(String(b.caja_id ?? ''), 'es', { sensitivity: 'base' }));
+
+  const total = detalle.reduce((sum, item) => sum + parseAmount(item.monto), 0);
+
+  return { total, detalle };
+}
+
+function buildRawCajaTotals(details = []) {
+  const totals = new Map();
+
+  for (const detail of details || []) {
+    const cajaId = normalizeLookup(detail?.caja_id);
+    if (!cajaId) {
+      continue;
+    }
+
+    const current = totals.get(cajaId) || {
+      caja_id: normalizeText(detail.caja_id),
+      caja: normalizeText(detail.caja) || normalizeText(detail.caja_id),
+      monto: 0,
+    };
+
+    current.monto += parseAmount(detail.monto);
+    if (!current.caja) {
+      current.caja = normalizeText(detail.caja) || normalizeText(detail.caja_id);
+    }
+
+    totals.set(cajaId, current);
+  }
+
+  return totals;
+}
+
+function buildBalancePorCaja({
+  depositos = [],
+  retiros = [],
+  bonos = [],
+  retirosNoPagados = [],
+  cajasConfig = [],
+} = {}) {
+  const depositosByCaja = buildRawCajaTotals(depositos);
+  const retirosByCaja = buildRawCajaTotals(retiros);
+  const bonosByCaja = buildRawCajaTotals(bonos);
+  const retirosNoPagadosByCaja = buildRawCajaTotals(retirosNoPagados);
+  const configByCaja = new Map();
+  const configuredCajas = [];
+
+  for (const caja of cajasConfig || []) {
+    const cajaId = normalizeLookup(caja?.id ?? caja?.caja_id);
+    if (!cajaId || configByCaja.has(cajaId)) {
+      continue;
+    }
+
+    const configEntry = {
+      caja_id: normalizeText(caja.id) || normalizeText(caja.caja_id),
+      caja: normalizeText(caja.nombre) || normalizeText(caja.caja) || normalizeText(caja.id) || normalizeText(caja.caja_id),
+    };
+
+    configByCaja.set(cajaId, configEntry);
+    configuredCajas.push(configEntry);
+  }
+
+  const allCajaIds = new Set([
+    ...depositosByCaja.keys(),
+    ...retirosByCaja.keys(),
+    ...bonosByCaja.keys(),
+    ...retirosNoPagadosByCaja.keys(),
+  ]);
+
+  const orphanCajas = [...allCajaIds]
+    .filter((cajaId) => !configByCaja.has(cajaId))
+    .map((cajaId) => {
+      const source = depositosByCaja.get(cajaId)
+        || retirosByCaja.get(cajaId)
+        || bonosByCaja.get(cajaId)
+        || retirosNoPagadosByCaja.get(cajaId);
+
+      return {
+        caja_id: normalizeText(source?.caja_id) || normalizeText(cajaId),
+        caja: normalizeText(source?.caja) || normalizeText(source?.caja_id) || normalizeText(cajaId),
+        _orphan: true,
+      };
+    })
+    .sort((a, b) => String(a.caja ?? '').localeCompare(String(b.caja ?? ''), 'es', { sensitivity: 'base' })
+      || String(a.caja_id ?? '').localeCompare(String(b.caja_id ?? ''), 'es', { sensitivity: 'base' }));
+
+  return [...configuredCajas, ...orphanCajas].map((caja) => {
+    const cajaKey = normalizeLookup(caja.caja_id);
+    const deposito = parseAmount(depositosByCaja.get(cajaKey)?.monto);
+    const retiro = parseAmount(retirosByCaja.get(cajaKey)?.monto);
+    const bono = parseAmount(bonosByCaja.get(cajaKey)?.monto);
+    const retiroNoPagado = parseAmount(retirosNoPagadosByCaja.get(cajaKey)?.monto);
+    const depositoReal = deposito - bono;
+    const retiroReal = retiro - retiroNoPagado;
+
+    return {
+      caja_id: caja.caja_id,
+      caja: caja.caja,
+      depositoReal,
+      retiroReal,
+      balance: depositoReal - retiroReal,
+      ...(caja._orphan ? { _orphan: true } : {}),
+    };
+  });
+}
+
+async function getDepositosTotalesAt(fecha, { exactDate = false, context = null } = {}) {
+  const ctx = context || await loadBalanceContext();
+  const { targetDate } = resolveRequestedDate(fecha, ctx.todayDate);
+  return memoizeContext(ctx, `depositos_totales:${targetDate}:${exactDate}`, async () => {
+    const rows = await getCachedSheetRows(ctx, 'depositos_totales', () => depositosTotalesService.getAll());
+    return buildLatestTotalsByCaja(rows, targetDate, { exactDate });
+  });
+}
+
+async function getRetirosTotalesAt(fecha, { exactDate = false, context = null } = {}) {
+  const ctx = context || await loadBalanceContext();
+  const { targetDate } = resolveRequestedDate(fecha, ctx.todayDate);
+  return memoizeContext(ctx, `retiros_totales:${targetDate}:${exactDate}`, async () => {
+    const rows = await getCachedSheetRows(ctx, 'retiros_totales', () => retirosTotalesService.getAll());
+    return buildLatestTotalsByCaja(rows, targetDate, { exactDate });
+  });
+}
+
+async function getBonosTotalesAt(fecha, { exactDate = false, context = null } = {}) {
+  const ctx = context || await loadBalanceContext();
+  const { targetDate } = resolveRequestedDate(fecha, ctx.todayDate);
+  return memoizeContext(ctx, `bonos_totales:${targetDate}:${exactDate}`, async () => {
+    const rows = await getCachedSheetRows(ctx, 'bonos_totales', () => bonosTotalesService.getAll());
+    return buildLatestTotalsByCaja(rows, targetDate, { exactDate });
+  });
+}
+
+async function getRetirosNoPagadosAt(fecha, { exactDate = false, context = null } = {}) {
+  const ctx = context || await loadBalanceContext();
+  const { targetDate } = resolveRequestedDate(fecha, ctx.todayDate);
+  return memoizeContext(ctx, `retiros_no_pagados:${targetDate}:${exactDate}`, async () => {
+    const rows = await getCachedSheetRows(ctx, 'retiros_no_pagados', () => retirosNoPagadosService.getAll());
+    return buildLatestTotalsByCaja(rows, targetDate, { exactDate });
+  });
+}
+
+async function getFirstDataDate(context = null) {
+  const ctx = context || await loadBalanceContext();
+  return memoizeContext(ctx, 'first_data_date', async () => {
+    const [depositos, retiros, bonos, retirosNoPagados] = await Promise.all([
+      getCachedSheetRows(ctx, 'depositos_totales', () => depositosTotalesService.getAll()),
+      getCachedSheetRows(ctx, 'retiros_totales', () => retirosTotalesService.getAll()),
+      getCachedSheetRows(ctx, 'bonos_totales', () => bonosTotalesService.getAll()),
+      getCachedSheetRows(ctx, 'retiros_no_pagados', () => retirosNoPagadosService.getAll()),
+    ]);
+
+    const dates = [];
+    const pushDate = (value) => {
+      const normalized = normalizeDateOnly(value);
+      if (normalized) {
+        dates.push(normalized);
+      }
+    };
+
+    for (const row of ctx.ingresos || []) pushDate(row?.fecha_movimiento);
+    for (const row of ctx.pagos || []) pushDate(row?.fecha_comprobante);
+    for (const row of ctx.gastos || []) pushDate(row?.fecha_gasto);
+    for (const row of ctx.bancosSnapshots || []) pushDate(row?.fecha);
+    for (const row of depositos) pushDate(row?.fecha);
+    for (const row of retiros) pushDate(row?.fecha);
+    for (const row of bonos) pushDate(row?.fecha);
+    for (const row of retirosNoPagados) pushDate(row?.fecha);
+
+    if (dates.length === 0) {
+      return null;
+    }
+
+    dates.sort();
+    return dates[0];
+  });
 }
 
 function aggregateIngresosByBank(rows, targetDate, { exactDate = false, allowedBankIds = null } = {}) {
@@ -360,7 +647,18 @@ function getEffectiveInitialAmount(setting, targetDate) {
 }
 
 async function loadBalanceContext() {
-  const [ingresos, pagos, gastos, bancos, bancosSnapshots, agentes, adminBankIds, agentBankIds, cajaInicioMesSetting] = await Promise.all([
+  const [
+    ingresos,
+    pagos,
+    gastos,
+    bancos,
+    bancosSnapshots,
+    agentes,
+    adminBankIds,
+    agentBankIds,
+    cajaInicioMesSetting,
+    cajasConfig,
+  ] = await Promise.all([
     ingresosService.getAll(),
     pagosService.getAll(),
     gastosService.getAll(),
@@ -370,6 +668,7 @@ async function loadBalanceContext() {
     getAdminBankIds(),
     getAgentBankIds(),
     getSetting('caja_inicio_mes').catch(() => ({ value: 0 })),
+    getTable('cajas'),
   ]);
 
   return {
@@ -379,6 +678,7 @@ async function loadBalanceContext() {
     bancos,
     bancosSnapshots,
     agentes,
+    cajasConfig,
     adminBankIds: new Set([...adminBankIds].map((value) => normalizeLookup(value))),
     agentBankIds: new Set([...agentBankIds].map((value) => normalizeLookup(value))),
     todayDate: todayLima(),
@@ -398,54 +698,57 @@ function resolveRequestedDate(fecha, todayDate) {
 async function getBancosAdminAt(fecha, context = null) {
   const ctx = context || await loadBalanceContext();
   const { targetDate, requestedDate, isNowMode } = resolveRequestedDate(fecha, ctx.todayDate);
-  const adminBankRows = ctx.bancos.filter((row) => ctx.adminBankIds.has(normalizeLookup(row.id)));
-  const isExplicitToday = requestedDate === ctx.todayDate && !isNowMode;
+  return memoizeContext(ctx, `bancos_admin:${targetDate}:${isNowMode}`, async () => {
+    const adminBankRows = ctx.bancos.filter((row) => ctx.adminBankIds.has(normalizeLookup(row.id)));
+    const isExplicitToday = requestedDate === ctx.todayDate && !isNowMode;
 
-  const detalle = adminBankRows
-    .map((bank) => {
-      const exactSnapshot = findLatestSnapshot(ctx.bancosSnapshots || [], bank.id, targetDate);
-      const hasTodaySnapshot = hasExactSnapshot(ctx.bancosSnapshots || [], bank.id, targetDate);
-      const snapshot = exactSnapshot;
-      const bankName = getBankNameById(adminBankRows, bank.id, bank.nombre);
-      let saldo = parseAmount(snapshot?.saldo);
+    const detalle = adminBankRows
+      .map((bank) => {
+        const exactSnapshot = findLatestSnapshot(ctx.bancosSnapshots || [], bank.id, targetDate);
+        const hasTodaySnapshot = hasExactSnapshot(ctx.bancosSnapshots || [], bank.id, targetDate);
+        const snapshot = exactSnapshot;
+        const bankName = getBankNameById(adminBankRows, bank.id, bank.nombre);
+        let saldo = parseAmount(snapshot?.saldo);
 
-      if (isNowMode && targetDate === ctx.todayDate && !hasTodaySnapshot) {
-        const ingresosHoy = ctx.ingresos.filter((row) => isActivo(row)
-          && normalizeLookup(row.banco_id) === normalizeLookup(bank.id)
-          && getRecordDate(row, 'fecha_movimiento') === targetDate);
-        const gastosHoy = ctx.gastos.filter((row) => isActivo(row)
-          && normalizeLookup(row.banco_id) === normalizeLookup(bank.id)
-          && getRecordDate(row, 'fecha_gasto') === targetDate);
+        if (isNowMode && targetDate === ctx.todayDate && !hasTodaySnapshot) {
+          const ingresosHoy = ctx.ingresos.filter((row) => isActivo(row)
+            && normalizeLookup(row.banco_id) === normalizeLookup(bank.id)
+            && getRecordDate(row, 'fecha_movimiento') === targetDate);
+          const gastosHoy = ctx.gastos.filter((row) => isActivo(row)
+            && normalizeLookup(row.banco_id) === normalizeLookup(bank.id)
+            && getRecordDate(row, 'fecha_gasto') === targetDate);
 
-        saldo += ingresosHoy.reduce((sum, row) => sum + parseAmount(row.monto), 0);
-        saldo -= gastosHoy.reduce((sum, row) => sum + parseAmount(row.monto), 0);
-      }
+          saldo += ingresosHoy.reduce((sum, row) => sum + parseAmount(row.monto), 0);
+          saldo -= gastosHoy.reduce((sum, row) => sum + parseAmount(row.monto), 0);
+        }
 
-      if (!snapshot && !isNowMode && !isExplicitToday) {
-        saldo = 0;
-      }
+        if (!snapshot && !isNowMode && !isExplicitToday) {
+          saldo = 0;
+        }
 
-      return {
-        banco_id: bank.id,
-        banco: bankName,
-        saldo,
-      };
-    })
-    .sort((a, b) => String(a.banco ?? '').localeCompare(String(b.banco ?? ''), 'es', { sensitivity: 'base' })
-      || String(a.banco_id ?? '').localeCompare(String(b.banco_id ?? ''), 'es', { sensitivity: 'base' }));
+        return {
+          banco_id: bank.id,
+          banco: bankName,
+          saldo,
+        };
+      })
+      .sort((a, b) => String(a.banco ?? '').localeCompare(String(b.banco ?? ''), 'es', { sensitivity: 'base' })
+        || String(a.banco_id ?? '').localeCompare(String(b.banco_id ?? ''), 'es', { sensitivity: 'base' }));
 
-  const total = detalle.reduce((sum, item) => sum + parseAmount(item.saldo), 0);
+    const total = detalle.reduce((sum, item) => sum + parseAmount(item.saldo), 0);
 
-  return { total, detalle };
+    return { total, detalle };
+  });
 }
 
 async function getCajasAgentesAt(fecha, context = null) {
   const ctx = context || await loadBalanceContext();
   const { targetDate } = resolveRequestedDate(fecha, ctx.todayDate);
-
-  const ingresos = aggregateIngresosByBank(ctx.ingresos, targetDate, { allowedBankIds: ctx.agentBankIds });
-  const pagos = aggregatePagosByBank(ctx.pagos, targetDate, { allowedBankIds: ctx.agentBankIds });
-  return buildCajasDetalle(ingresos, pagos);
+  return memoizeContext(ctx, `cajas_agentes:${targetDate}`, async () => {
+    const ingresos = aggregateIngresosByBank(ctx.ingresos, targetDate, { allowedBankIds: ctx.agentBankIds });
+    const pagos = aggregatePagosByBank(ctx.pagos, targetDate, { allowedBankIds: ctx.agentBankIds });
+    return buildCajasDetalle(ingresos, pagos);
+  });
 }
 
 async function getAgentCajaAt({ agente, fecha = null } = {}, context = null) {
@@ -527,72 +830,126 @@ async function getAgentCajaAt({ agente, fecha = null } = {}, context = null) {
 async function getTotalGastosAt(fecha, context = null) {
   const ctx = context || await loadBalanceContext();
   const { targetDate } = resolveRequestedDate(fecha, ctx.todayDate);
-  const gastos = aggregateGastos(ctx.gastos, targetDate);
-  return buildGastosDetalle(gastos);
+  return memoizeContext(ctx, `gastos_acum:${targetDate}`, async () => {
+    const gastos = aggregateGastos(ctx.gastos, targetDate);
+    return buildGastosDetalle(gastos);
+  });
 }
 
 async function getGastosDelDia(fecha, context = null) {
   const ctx = context || await loadBalanceContext();
   const { targetDate } = resolveRequestedDate(fecha, ctx.todayDate);
-  const gastos = aggregateGastos(ctx.gastos, targetDate, { exactDate: true });
-  return buildGastosDetalle(gastos);
+  return memoizeContext(ctx, `gastos_dia:${targetDate}`, async () => {
+    const gastos = aggregateGastos(ctx.gastos, targetDate, { exactDate: true });
+    return buildGastosDetalle(gastos);
+  });
 }
 
-function buildSnapshotForDate(targetDate, ctx, { nowMode = false } = {}) {
-  const bancosSnapshots = ctx.bancosSnapshots || [];
-  const adminBankRows = ctx.bancos.filter((row) => ctx.adminBankIds.has(normalizeLookup(row.id)));
-  const ingresosUpToDate = aggregateIngresosByBank(ctx.ingresos, targetDate, {
-    exactDate: false,
-    allowedBankIds: ctx.agentBankIds,
+async function getVariacionCajaDia(fecha, context = null) {
+  const ctx = context || await loadBalanceContext();
+  const { targetDate } = resolveRequestedDate(fecha, ctx.todayDate);
+  const fechaPrev = previousDay(targetDate);
+
+  const [bancosF, bancosPrev, cajasF, cajasPrev, depositosF, retirosF, bonosF, rnpF, gastosF] = await Promise.all([
+    getBancosAdminAt(targetDate, ctx),
+    fechaPrev ? getBancosAdminAt(fechaPrev, ctx) : Promise.resolve({ total: 0, detalle: [] }),
+    getCajasAgentesAt(targetDate, ctx),
+    fechaPrev ? getCajasAgentesAt(fechaPrev, ctx) : Promise.resolve({ total: 0, detalle: [] }),
+    getDepositosTotalesAt(targetDate, { exactDate: true, context: ctx }),
+    getRetirosTotalesAt(targetDate, { exactDate: true, context: ctx }),
+    getBonosTotalesAt(targetDate, { exactDate: true, context: ctx }),
+    getRetirosNoPagadosAt(targetDate, { exactDate: true, context: ctx }),
+    getGastosDelDia(targetDate, ctx),
+  ]);
+
+  const depositosRealesDia = depositosF.total - bonosF.total;
+  const retirosRealesDia = retirosF.total - rnpF.total;
+
+  return (
+    (bancosF.total - bancosPrev.total)
+    + (cajasF.total - cajasPrev.total)
+    - ((depositosRealesDia - retirosRealesDia) - gastosF.total)
+  );
+}
+
+async function getVariacionCajaAcumulada(fecha, context = null) {
+  const ctx = context || await loadBalanceContext();
+  const { targetDate } = resolveRequestedDate(fecha, ctx.todayDate);
+  const fechaInicio = await getFirstDataDate(ctx);
+
+  if (!fechaInicio || targetDate < fechaInicio) {
+    return 0;
+  }
+
+  let total = 0;
+  for (let currentDate = fechaInicio; currentDate && currentDate <= targetDate; currentDate = nextDay(currentDate)) {
+    total += await getVariacionCajaDia(currentDate, ctx);
+  }
+
+  return total;
+}
+
+async function buildSnapshotForDate(targetDate, ctx, { nowMode = false } = {}) {
+  const [
+    bancosAdmin,
+    cajasAgentes,
+    totalGastos,
+    depositosDia,
+    retirosDia,
+    bonosDia,
+    retirosNoPagadosDia,
+    depositosAcum,
+    retirosAcum,
+    bonosAcum,
+    retirosNoPagadosAcum,
+    variacionCajaDia,
+    variacionCajaAcumulada,
+  ] = await Promise.all([
+    getBancosAdminAt(nowMode ? null : targetDate, ctx),
+    getCajasAgentesAt(targetDate, ctx),
+    getTotalGastosAt(targetDate, ctx),
+    getDepositosTotalesAt(targetDate, { exactDate: true, context: ctx }),
+    getRetirosTotalesAt(targetDate, { exactDate: true, context: ctx }),
+    getBonosTotalesAt(targetDate, { exactDate: true, context: ctx }),
+    getRetirosNoPagadosAt(targetDate, { exactDate: true, context: ctx }),
+    getDepositosTotalesAt(targetDate, { exactDate: false, context: ctx }),
+    getRetirosTotalesAt(targetDate, { exactDate: false, context: ctx }),
+    getBonosTotalesAt(targetDate, { exactDate: false, context: ctx }),
+    getRetirosNoPagadosAt(targetDate, { exactDate: false, context: ctx }),
+    getVariacionCajaDia(targetDate, ctx),
+    getVariacionCajaAcumulada(targetDate, ctx),
+  ]);
+
+  const depositosRealesDia = depositosDia.total - bonosDia.total;
+  const retirosRealesDia = retirosDia.total - retirosNoPagadosDia.total;
+  const balanceIngresosDia = depositosRealesDia - retirosRealesDia;
+
+  const depositosRealesAcumulado = depositosAcum.total - bonosAcum.total;
+  const retirosRealesAcumulado = retirosAcum.total - retirosNoPagadosAcum.total;
+  const balanceIngresosAcumulado = depositosRealesAcumulado - retirosRealesAcumulado;
+  const balanceIngresosDiaPorCaja = buildBalancePorCaja({
+    depositos: depositosDia.detalle,
+    retiros: retirosDia.detalle,
+    bonos: bonosDia.detalle,
+    retirosNoPagados: retirosNoPagadosDia.detalle,
+    cajasConfig: ctx.cajasConfig || [],
   });
-  const pagosUpToDate = aggregatePagosByBank(ctx.pagos, targetDate, {
-    exactDate: false,
-    allowedBankIds: ctx.agentBankIds,
+  const balanceIngresosAcumuladoPorCaja = buildBalancePorCaja({
+    depositos: depositosAcum.detalle,
+    retiros: retirosAcum.detalle,
+    bonos: bonosAcum.detalle,
+    retirosNoPagados: retirosNoPagadosAcum.detalle,
+    cajasConfig: ctx.cajasConfig || [],
   });
-  const gastosUpToDate = aggregateGastos(ctx.gastos, targetDate, { exactDate: false });
-  const adminIngresosHoy = aggregateIngresosByBank(ctx.ingresos, targetDate, { exactDate: true });
-  const adminGastosHoy = aggregateGastos(ctx.gastos, targetDate, { exactDate: true });
 
-  const bancosAdmin = adminBankRows
-    .map((bank) => {
-      const exactSnapshot = hasExactSnapshot(bancosSnapshots, bank.id, targetDate)
-        ? findLatestSnapshot(bancosSnapshots, bank.id, targetDate)
-        : findLatestSnapshot(bancosSnapshots, bank.id, targetDate);
-      let saldo = parseAmount(exactSnapshot?.saldo);
-
-      if (nowMode && targetDate === ctx.todayDate && !hasExactSnapshot(bancosSnapshots, bank.id, targetDate)) {
-        saldo += adminIngresosHoy
-          .filter((row) => normalizeLookup(row.banco_id) === normalizeLookup(bank.id))
-          .reduce((sum, row) => sum + parseAmount(row.monto), 0);
-
-        saldo -= adminGastosHoy
-          .filter((row) => normalizeLookup(row.banco_id) === normalizeLookup(bank.id))
-          .reduce((sum, row) => sum + parseAmount(row.monto), 0);
-      }
-
-      return {
-        banco_id: bank.id,
-        banco: getBankNameById(ctx.bancos, bank.id, bank.nombre),
-        saldo,
-      };
-    })
-    .sort((a, b) => String(a.banco ?? '').localeCompare(String(b.banco ?? ''), 'es', { sensitivity: 'base' })
-      || String(a.banco_id ?? '').localeCompare(String(b.banco_id ?? ''), 'es', { sensitivity: 'base' }));
-
-  const cajasAgentes = buildCajasDetalle(ingresosUpToDate, pagosUpToDate);
-  const totalGastos = buildGastosDetalle(gastosUpToDate);
-
-  const bancosAdminTotal = bancosAdmin.reduce((sum, item) => sum + parseAmount(item.saldo), 0);
+  const bancosAdminTotal = bancosAdmin.total;
   const cajasAgentesTotal = cajasAgentes.total;
   const cajaDisponible = bancosAdminTotal + cajasAgentesTotal - ctx.cajaInicioMes;
   const balanceAcumulado = bancosAdminTotal + cajasAgentesTotal + totalGastos.total - ctx.cajaInicioMes;
 
-  return {
+  const snapshot = {
     fecha: nowMode ? null : targetDate,
-    bancosAdmin: {
-      total: bancosAdminTotal,
-      detalle: bancosAdmin,
-    },
+    bancosAdmin,
     cajasAgentes: {
       total: cajasAgentesTotal,
       detalle: cajasAgentes.detalle.map((item) => ({
@@ -601,10 +958,70 @@ function buildSnapshotForDate(targetDate, ctx, { nowMode = false } = {}) {
       })),
     },
     totalGastos,
+    depositosDia,
+    retirosDia,
+    bonosDia,
+    retirosNoPagadosDia,
+    depositosAcum,
+    retirosAcum,
+    bonosAcum,
+    retirosNoPagadosAcum,
+    depositosRealesDia,
+    retirosRealesDia,
+    balanceIngresosDia,
+    depositosRealesAcumulado,
+    retirosRealesAcumulado,
+    balanceIngresosAcumulado,
+    variacionCajaDia,
+    variacionCajaAcumulada,
     cajaDisponible,
     balanceAcumulado,
     cajaInicioMes: ctx.cajaInicioMes,
   };
+
+  const nonEnumerableFields = {
+    depositosDia,
+    retirosDia,
+    bonosDia,
+    retirosNoPagadosDia,
+    depositosAcum,
+    retirosAcum,
+    bonosAcum,
+    retirosNoPagadosAcum,
+    depositosRealesDia,
+    retirosRealesDia,
+    balanceIngresosDia,
+    depositosRealesAcumulado,
+    retirosRealesAcumulado,
+    balanceIngresosAcumulado,
+    balanceIngresosDiaPorCaja,
+    balanceIngresosAcumuladoPorCaja,
+    variacionCajaDia,
+    variacionCajaAcumulada,
+  };
+
+  Object.entries(nonEnumerableFields).forEach(([key, value]) => {
+    Object.defineProperty(snapshot, key, {
+      value,
+      enumerable: false,
+      configurable: true,
+      writable: false,
+    });
+  });
+
+  Object.defineProperty(snapshot, 'toJSON', {
+    enumerable: false,
+    configurable: true,
+    writable: false,
+    value: function toJSON() {
+      return {
+        ...snapshot,
+        ...nonEnumerableFields,
+      };
+    },
+  });
+
+  return snapshot;
 }
 
 async function getBalanceAt({ fecha = null } = {}) {
@@ -644,9 +1061,16 @@ module.exports = {
   getBalanceAt,
   getBancosAdminAt,
   getCajasAgentesAt,
+  getDepositosTotalesAt,
+  getRetirosTotalesAt,
+  getBonosTotalesAt,
+  getRetirosNoPagadosAt,
+  getVariacionCajaDia,
+  getVariacionCajaAcumulada,
   getTotalGastosAt,
   getGastosDelDia,
   getAgentCajaAt,
   getAgentBalance,
   getGlobalBalance,
+  getFirstDataDate,
 };

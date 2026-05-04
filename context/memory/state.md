@@ -1,70 +1,57 @@
-# Estado del Proyecto - Golden City Backoffice
+﻿# Estado del Proyecto - Golden City Backoffice
 
-## Actualizacion: 2026-05-02 — Sprint 16 CERRADO
+## Actualizacion: 2026-05-05 - Sprint 17 CERRADO
 
-Sprint 16 completado al 100% (T-083 → T-092). 152/152 tests passing. Commit: 28663af. Push a main → Railway + Vercel en deploy.
+Sprint 17 de "Totales por caja e indicadores derivados de Balance" quedo completado al 100% (T-093 a T-101). El patron base de totales por caja, los 4 modulos full-stack, los 6 indicadores de Balance, las 2 variaciones de caja, el detalle por caja y la documentacion final quedaron implementados y documentados.
+
+### Alcance del Sprint 17
+- 4 modulos nuevos de "totales por caja" (Depositos, Retiros, Bonos, Retiros no pagados): registro UPSERT por (fecha + caja_id), admin-only en POST y GET, replican el patron de Bancos.
+- 6 indicadores nuevos en Balance: depositos reales, retiros reales y balance ingresos en versiones dia y acumulada.
+- 2 indicadores de variacion de caja: diaria y acumulada.
+- 2 cuadros de detalle en Balance: balance por caja (dia y acumulado).
+- Documentacion final (T-101): PRD, architecture, decisions, state.md, BACKLOG.md.
+
+### Estado del Sprint
+- T-093 completado: schema central, setupSheets idempotente, documentacion y backlog actualizados.
+- T-094 completado: backend + frontend de `depositos-totales`, admin-only en POST/GET, UPSERT por `(fecha, caja_id)` y auditoria de create/overwrite.
+- T-095 completado: backend + frontend de `retiros-totales`, admin-only en POST/GET, UPSERT por `(fecha, caja_id)`.
+- T-096 completado: backend + frontend de `bonos-totales`, admin-only en POST/GET, UPSERT por `(fecha, caja_id)`.
+- T-097 completado: backend + frontend de `retiros-no-pagados`, admin-only en POST/GET, UPSERT por `(fecha, caja_id)`.
+- T-098 completado: balance global expone los 6 indicadores diarios/acumulados de ingresos reales.
+- T-099 completado: balance ahora expone la variacion de caja del dia y acumulada con cache por request y smoke de 60 dias.
+- T-100 completado: balance expone el detalle de ingresos por caja para dia y acumulado, con cajas huérfanas marcadas y render responsive.
+- T-101 completado: PRD, architecture, decisions, state.md y BACKLOG.md sincronizados con el cierre del sprint.
+- Validacion completada: `backend npm test` (176/176), `frontend npm run typecheck`, `frontend npm run lint`, `frontend npm run build`.
+- Commit: 03494a5. Push a main -> Railway + Vercel en deploy.
+
+## Actualizacion: 2026-05-02 - Sprint 16 CERRADO
+
+Sprint 16 completado al 100% (T-083 -> T-092). 152/152 tests passing. Commit: 28663af. Push a main -> Railway + Vercel en deploy.
 
 ### Resumen de cambios Sprint 16
-- **T-083/084**: `cajaDisponible` y `balanceAcumulado` con suma de gastos; frontend actualizado.
-- **T-085**: Hard delete fisico con auditoria en pagos, ingresos y gastos.
-- **T-086/087/088**: Frontend reemplaza "Anular" por "Eliminar" en los 3 modulos.
-- **T-089**: Keep-alive Railway: `GET /api/health`, `railway.json`, `HEALTHCHECK` en Dockerfile.
-- **T-090**: Retry/backoff 5 intentos (250→4000ms), warmup 30s, `BackendStatusBanner` con 3 estados.
-- **T-091/092**: Deteccion de duplicados (ventana 10min, 4 campos), modal de confirmacion, bypass `X-Confirm-Duplicate: true`.
+- T-083/084: `cajaDisponible` y `balanceAcumulado` con suma de gastos; frontend actualizado.
+- T-085: Hard delete fisico con auditoria en pagos, ingresos y gastos.
+- T-086/087/088: Frontend reemplaza "Anular" por "Eliminar" en los 3 modulos.
+- T-089: Keep-alive Railway: `GET /api/health`, `railway.json`, `HEALTHCHECK` en Dockerfile.
+- T-090: Retry/backoff 5 intentos (250->4000ms), warmup 30s, `BackendStatusBanner` con 3 estados.
+- T-091/092: Deteccion de duplicados (ventana 10min, 4 campos), modal de confirmacion, bypass `X-Confirm-Duplicate: true`.
 
 ### Estado de produccion
-- Backend: Railway (desplegando tras push)
-- Frontend: Vercel (desplegando tras push)
+- Backend: Railway (deploy en curso tras push)
+- Frontend: Vercel (deploy en curso tras push)
 - Tests: 152/152 pass
 - Deuda tecnica activa: T-057 (CI/CD headers legacy), T-058 (backup procedure)
 
-## Fecha: 2026-04-16
-
-## Hitos Completados
-- [x] Todas las skills requeridas instaladas (10 en total)
-- [x] Inicializacion de proyecto Next.js + Express
-- [x] Backend: 7 modulos completos (pagos, ingresos, gastos, bancos, balance, config, OCR)
-- [x] Frontend: 6 paginas completas (balance, pagos, ingresos, gastos, bancos, configuracion)
-- [x] Design system dark premium implementado + responsive
-- [x] OCR pipeline con Google Vision + Tesseract.js fallback
-- [x] Auditoria en toda mutacion
-- [x] Documentacion completa del proyecto (PRD, arquitectura, tech-stack, decisiones, backlog)
-- [x] Google Sheets real verificado end-to-end con reporte documentado
-- [x] Error handling robusto (AppError hierarchy, retry, error handler global)
-- [x] Validacion referencial no bloqueante en pagos, ingresos y gastos
-- [x] UX resilience (timeout, retry frontend, health polling, skeletons)
-- [x] Responsive design (sidebar mobile, hamburger, backdrop)
-
-## Estado Actual
-- 25 de 31 tickets completados
-- El sistema funciona end-to-end contra Google Sheets real
-- Bug conocido: removeFromTable no borra de Sheets (TICKET-031)
-
-## Proximos Pasos
-1. Fix removeFromTable bug (TICKET-031) - P1
-2. Guia de setup (TICKET-026) - P1
-3. Filtros en pagos (TICKET-027) - P2
-4. Anulacion/edicion registros (TICKET-028) - P2
-5. Interfaz de auditoria (TICKET-029) - P2
-6. Autenticacion JWT (TICKET-030) - P1
-
 ## Documentacion del Proyecto
 - `docs/PRD.md` - Product Requirements Document
-- `docs/architecture.md` - Arquitectura completa (v1.1)
+- `docs/architecture.md` - Arquitectura completa (v1.12)
 - `docs/tech-stack.md` - Stack tecnologico
-- `docs/decisions.md` - Decisiones tecnicas / 13 ADRs (v1.1)
-- `tasks/BACKLOG.md` - Indice del backlog
-- `tasks/TICKET-*.md` - 31 tickets (25 completados, 6 pendientes)
+- `docs/decisions.md` - Decisiones tecnicas / ADRs
+- `tasks/BACKLOG.md` - Indice del backlog (T-098 completado)
+- `tasks/TICKET-*.md` - tickets del proyecto
 
 ## Notas Tecnicas
 - TypeScript en frontend, JavaScript CommonJS en backend
 - Persistencia dual: Google Sheets (prod) / in-memory (dev)
-- Auth por headers (placeholder) - requiere JWT para produccion
+- Auth por JWT en backend
 - Verificacion E2E automatizada disponible en `backend/scripts/verifySheetsE2E.js`
-- Bug: config.service.js::removeFromTable() solo borra de seed data, no de Sheets
-
-## Deuda Tecnica (menor)
-- Headers de tablas definidos en 2 sitios (config.service.js y sheetsSchema.js)
-- console.log DEBUG en ocr.service.js no gateado por NODE_ENV
-- driveInstance creada pero no usada en sheetsClient.js
-- bancos.service.js no valida referencia del banco en config

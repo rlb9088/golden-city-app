@@ -30,6 +30,10 @@ test('los GET de movimientos y balance requieren verifyToken + requireAuth', () 
   const ingresosRouter = require('../routes/ingresos.routes');
   const gastosRouter = require('../routes/gastos.routes');
   const bancosRouter = require('../routes/bancos.routes');
+  const depositosTotalesRouter = require('../routes/depositos-totales.routes');
+  const bonosTotalesRouter = require('../routes/bonos-totales.routes');
+  const retirosTotalesRouter = require('../routes/retiros-totales.routes');
+  const retirosNoPagadosRouter = require('../routes/retiros-no-pagados.routes');
   const balanceRouter = require('../routes/balance.routes');
 
   assert.deepStrictEqual(getRouteStack(pagosRouter, 'get', '/'), ['verifyToken', 'requireAuth', 'getAll']);
@@ -40,10 +44,37 @@ test('los GET de movimientos y balance requieren verifyToken + requireAuth', () 
   assert.deepStrictEqual(getRouteStack(gastosRouter, 'get', '/:id'), ['verifyToken', 'requireAuth', 'getById']);
   assert.deepStrictEqual(getRouteStack(bancosRouter, 'get', '/scoped'), ['verifyToken', 'requireAuth', 'getScoped']);
   assert.deepStrictEqual(getRouteStack(bancosRouter, 'get', '/'), ['verifyToken', 'requireAuth', 'getPagedAndFiltered']);
+  assert.deepStrictEqual(getRouteStack(depositosTotalesRouter, 'get', '/'), ['verifyToken', 'requireAdmin', 'getPagedAndFiltered']);
+  assert.deepStrictEqual(getRouteStack(bonosTotalesRouter, 'get', '/'), ['verifyToken', 'requireAdmin', 'getPagedAndFiltered']);
+  assert.deepStrictEqual(getRouteStack(retirosTotalesRouter, 'get', '/'), ['verifyToken', 'requireAdmin', 'getPagedAndFiltered']);
+  assert.deepStrictEqual(getRouteStack(retirosNoPagadosRouter, 'get', '/'), ['verifyToken', 'requireAdmin', 'getPagedAndFiltered']);
   assert.deepStrictEqual(getRouteStack(balanceRouter, 'get', '/'), ['verifyToken', 'requireAuth', 'validateQueryMiddleware', 'getGlobal']);
   assert.deepStrictEqual(getRouteStack(balanceRouter, 'get', '/mi-caja'), ['verifyToken', 'requireAuth', 'validateQueryMiddleware', 'getMiCaja']);
   assert.deepStrictEqual(getRouteStack(balanceRouter, 'get', '/:agente'), ['verifyToken', 'requireAuth', 'getByAgent']);
   assert.ok(getRouteIndex(balanceRouter, 'get', '/mi-caja') < getRouteIndex(balanceRouter, 'get', '/:agente'));
+});
+
+test('los POST de depositos y retiros totales requieren admin y validacion de body', () => {
+  const depositosTotalesRouter = require('../routes/depositos-totales.routes');
+  const bonosTotalesRouter = require('../routes/bonos-totales.routes');
+  const retirosTotalesRouter = require('../routes/retiros-totales.routes');
+  const retirosNoPagadosRouter = require('../routes/retiros-no-pagados.routes');
+
+  assert.deepStrictEqual(getRouteStack(depositosTotalesRouter, 'post', '/').slice(0, 2), ['verifyToken', 'requireAdmin']);
+  assert.equal(getRouteStack(depositosTotalesRouter, 'post', '/')[3], 'create');
+  assert.equal(typeof getRouteHandlers(depositosTotalesRouter, 'post', '/')[2], 'function');
+
+  assert.deepStrictEqual(getRouteStack(bonosTotalesRouter, 'post', '/').slice(0, 2), ['verifyToken', 'requireAdmin']);
+  assert.equal(getRouteStack(bonosTotalesRouter, 'post', '/')[3], 'create');
+  assert.equal(typeof getRouteHandlers(bonosTotalesRouter, 'post', '/')[2], 'function');
+
+  assert.deepStrictEqual(getRouteStack(retirosTotalesRouter, 'post', '/').slice(0, 2), ['verifyToken', 'requireAdmin']);
+  assert.equal(getRouteStack(retirosTotalesRouter, 'post', '/')[3], 'create');
+  assert.equal(typeof getRouteHandlers(retirosTotalesRouter, 'post', '/')[2], 'function');
+
+  assert.deepStrictEqual(getRouteStack(retirosNoPagadosRouter, 'post', '/').slice(0, 2), ['verifyToken', 'requireAdmin']);
+  assert.equal(getRouteStack(retirosNoPagadosRouter, 'post', '/')[3], 'create');
+  assert.equal(typeof getRouteHandlers(retirosNoPagadosRouter, 'post', '/')[2], 'function');
 });
 
 test('los DELETE de movimientos requieren admin y no validan body', () => {

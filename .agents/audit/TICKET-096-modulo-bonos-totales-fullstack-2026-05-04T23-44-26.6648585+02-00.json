@@ -1,0 +1,41 @@
+{
+  "event": {
+    "action": "update",
+    "entity": "ticket:TICKET-096-modulo-bonos-totales-fullstack",
+    "user": "codex",
+    "timestamp": "2026-05-04T23:44:26.6648585+02:00",
+    "changes": {
+      "summary": "Implemented the full-stack Bonos Totales module as the Sprint 17 replica of Depositos Totales.",
+      "code": [
+        "Added backend/schemas/bonos-totales.schema.js with bonoTotalSchema.",
+        "Added backend/services/bonos-totales.service.js with upsert(), getPagedAndFiltered() and getLatest() using sheet bonos_totales and audit entity bono_total.",
+        "Added backend/controllers/bonos-totales.controller.js and backend/routes/bonos-totales.routes.js with verifyToken + requireAdmin on POST and GET.",
+        "Registered /api/bonos-totales in backend/index.js.",
+        "Added backend/tests/bonos-totales.service.test.js covering create, overwrite, validation and latest selection.",
+        "Added frontend/src/app/bonos-totales/page.tsx and frontend/src/app/bonos-totales/bonos-totales.css.",
+        "Extended frontend/src/lib/api.ts with BonoTotalRecord, createBonoTotal and getBonosTotales.",
+        "Added the Bonos Totales sidebar entry for admin users.",
+        "Updated backend/package.json lint/test coverage to include the new files.",
+        "Extended backend/tests/auth-gate-routes.test.js to assert the new admin-only route."
+      ],
+      "docs": [
+        "tasks/TICKET-096-modulo-bonos-totales-fullstack.md",
+        "tasks/BACKLOG.md"
+      ],
+      "validation": [
+        "cd backend && npm test",
+        "cd frontend && npm run lint",
+        "cd frontend && npm run build",
+        "cd frontend && npm run typecheck"
+      ],
+      "status": {
+        "ticket": "COMPLETADO",
+        "frontend_route": "/bonos-totales",
+        "audit_entity": "bono_total"
+      }
+    }
+  },
+  "log": {
+    "status": "stored"
+  }
+}

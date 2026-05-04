@@ -24,3 +24,6 @@
 - **Componentes**: Reutilizables, con estilos en archivos `.css` separados.
 - **Hooks**: Para lógica de estado y llamadas a API.
 - **Estilos**: Variables CSS globales para consistencia visual.
+
+## Notas de Balance
+- `balance.service.js` ya calcula el snapshot global con 13 KPIs visibles y 5 tablas de detalle, incluyendo la variacion de caja del dia y acumulada y el desglose por caja, reutilizando cache por request sobre las hojas de totales por caja.

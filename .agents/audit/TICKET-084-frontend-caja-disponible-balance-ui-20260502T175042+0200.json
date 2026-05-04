@@ -1,0 +1,33 @@
+{
+  "event": {
+    "action": "update",
+    "entity": "TICKET-084-frontend-caja-disponible-balance-ui",
+    "user": "codex",
+    "timestamp": "2026-05-02T17:50:42+02:00",
+    "changes": {
+      "before": {
+        "frontendBalanceSnapshotField": "balanceDia",
+        "adminDashboardKpiLabel": "Balance del dia",
+        "ticketStatus": "PENDIENTE",
+        "backlogTicket084Status": "PENDIENTE"
+      },
+      "after": {
+        "frontendBalanceSnapshotField": "cajaDisponible",
+        "adminDashboardKpiLabel": "Caja disponible",
+        "cajaDisponibleSubtitle": "Bancos admin + Cajas agentes - Caja inicio mes",
+        "balanceAcumuladoSubtitle": "Bancos + Cajas + Gastos - Caja inicio mes",
+        "ticketStatus": "COMPLETADO",
+        "backlogTicket084Status": "COMPLETADO",
+        "validation": [
+          "npm run lint",
+          "npm run test",
+          "npm run build",
+          "node --test tests/balance-service.test.js"
+        ]
+      }
+    }
+  },
+  "log": {
+    "status": "stored"
+  }
+}

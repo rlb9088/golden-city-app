@@ -29,6 +29,11 @@ export interface ConfigBanco {
   propietario_id?: string;
 }
 
+export interface ConfigCaja {
+  id: string;
+  nombre: string;
+}
+
 export interface ConfigSetting {
   key: string;
   value: string | number;
@@ -117,6 +122,62 @@ export interface BancoRecord {
   banco: string;
   saldo: string | number;
   propietario_id?: string;
+}
+
+export interface DepositoTotalRecord {
+  id: string;
+  fecha: string;
+  caja_id: string;
+  caja: string;
+  monto: string | number;
+}
+
+export interface DepositosTotalesFilters {
+  caja?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface BonoTotalRecord {
+  id: string;
+  fecha: string;
+  caja_id: string;
+  caja: string;
+  monto: string | number;
+}
+
+export interface BonosTotalesFilters {
+  caja?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface RetiroTotalRecord {
+  id: string;
+  fecha: string;
+  caja_id: string;
+  caja: string;
+  monto: string | number;
+}
+
+export interface RetirosTotalesFilters {
+  caja?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface RetiroNoPagadoRecord {
+  id: string;
+  fecha: string;
+  caja_id: string;
+  caja: string;
+  monto: string | number;
+}
+
+export interface RetirosNoPagadosFilters {
+  caja?: string;
+  limit?: number;
+  offset?: number;
 }
 
 export interface AuditRecord {
@@ -441,7 +502,7 @@ export async function getConfig() {
     // Full config structure matching backend
     agentes_full: ConfigAgent[];
     bancos_full: ConfigBanco[];
-    cajas_full: Record<string, string>[];
+    cajas_full: ConfigCaja[];
     categorias_full: Record<string, string>[];
     usuarios_full: Record<string, string>[];
     tipos_pago_full: Record<string, string>[];
@@ -449,6 +510,11 @@ export async function getConfig() {
   }>('/api/config');
 
   return response.data;
+}
+
+export async function getConfigCajas() {
+  const config = await getConfig();
+  return config.cajas_full;
 }
 
 // Config CRUD
@@ -703,6 +769,90 @@ export async function getBancos(filters: BancosFilters = {}) {
   return request<{ status: string; data: PaginatedResponse<BancoRecord> }>(`/api/bancos${suffix}`);
 }
 
+export async function createDepositoTotal(data: { caja_id: string; monto: number; fecha: string }) {
+  return request<{ status: string; data: DepositoTotalRecord & { overwritten?: boolean; warnings?: string[] } }>('/api/depositos-totales', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getDepositosTotales(filters: DepositosTotalesFilters = {}) {
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      params.set(key, String(value));
+    }
+  });
+
+  const query = params.toString();
+  const suffix = query ? `?${query}` : '';
+  return request<{ status: string; data: PaginatedResponse<DepositoTotalRecord> }>(`/api/depositos-totales${suffix}`);
+}
+
+export async function createBonoTotal(data: { caja_id: string; monto: number; fecha: string }) {
+  return request<{ status: string; data: BonoTotalRecord & { overwritten?: boolean; warnings?: string[] } }>('/api/bonos-totales', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getBonosTotales(filters: BonosTotalesFilters = {}) {
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      params.set(key, String(value));
+    }
+  });
+
+  const query = params.toString();
+  const suffix = query ? `?${query}` : '';
+  return request<{ status: string; data: PaginatedResponse<BonoTotalRecord> }>(`/api/bonos-totales${suffix}`);
+}
+
+export async function createRetiroTotal(data: { caja_id: string; monto: number; fecha: string }) {
+  return request<{ status: string; data: RetiroTotalRecord & { overwritten?: boolean; warnings?: string[] } }>('/api/retiros-totales', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getRetirosTotales(filters: RetirosTotalesFilters = {}) {
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      params.set(key, String(value));
+    }
+  });
+
+  const query = params.toString();
+  const suffix = query ? `?${query}` : '';
+  return request<{ status: string; data: PaginatedResponse<RetiroTotalRecord> }>(`/api/retiros-totales${suffix}`);
+}
+
+export async function createRetiroNoPagado(data: { caja_id: string; monto: number; fecha: string }) {
+  return request<{ status: string; data: RetiroNoPagadoRecord & { overwritten?: boolean; warnings?: string[] } }>('/api/retiros-no-pagados', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getRetirosNoPagados(filters: RetirosNoPagadosFilters = {}) {
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      params.set(key, String(value));
+    }
+  });
+
+  const query = params.toString();
+  const suffix = query ? `?${query}` : '';
+  return request<{ status: string; data: PaginatedResponse<RetiroNoPagadoRecord> }>(`/api/retiros-no-pagados${suffix}`);
+}
+
 export async function getScopedBancos(agenteId?: string) {
   const params = new URLSearchParams();
   if (agenteId && String(agenteId).trim()) {
@@ -763,6 +913,26 @@ export interface BalanceExpenseDetail {
   monto: number;
 }
 
+export interface BalanceCajaTotalDetail {
+  caja_id: string;
+  caja: string;
+  monto: number;
+}
+
+export interface BalanceCajaSnapshot {
+  total: number;
+  detalle: BalanceCajaTotalDetail[];
+}
+
+export interface BalanceCajaDetail {
+  caja_id: string;
+  caja: string;
+  depositoReal: number;
+  retiroReal: number;
+  balance: number;
+  _orphan?: boolean;
+}
+
 export interface BalanceSnapshot {
   fecha: string | null;
   bancosAdmin: {
@@ -777,9 +947,27 @@ export interface BalanceSnapshot {
     total: number;
     detalle: BalanceExpenseDetail[];
   };
+  depositosRealesDia: number;
+  retirosRealesDia: number;
+  balanceIngresosDia: number;
+  depositosRealesAcumulado: number;
+  retirosRealesAcumulado: number;
+  balanceIngresosAcumulado: number;
+  balanceIngresosDiaPorCaja: BalanceCajaDetail[];
+  balanceIngresosAcumuladoPorCaja: BalanceCajaDetail[];
+  variacionCajaDia: number;
+  variacionCajaAcumulada: number;
   cajaDisponible: number;
   balanceAcumulado: number;
   cajaInicioMes: number;
+  depositosDia?: BalanceCajaSnapshot;
+  retirosDia?: BalanceCajaSnapshot;
+  bonosDia?: BalanceCajaSnapshot;
+  retirosNoPagadosDia?: BalanceCajaSnapshot;
+  depositosAcum?: BalanceCajaSnapshot;
+  retirosAcum?: BalanceCajaSnapshot;
+  bonosAcum?: BalanceCajaSnapshot;
+  retirosNoPagadosAcum?: BalanceCajaSnapshot;
 }
 
 export interface MiCajaMovimiento {

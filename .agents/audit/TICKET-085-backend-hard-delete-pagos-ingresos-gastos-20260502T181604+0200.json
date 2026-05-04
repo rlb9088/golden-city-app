@@ -1,0 +1,36 @@
+{
+  "event": {
+    "action": "update",
+    "entity": "ticket:TICKET-085-backend-hard-delete-pagos-ingresos-gastos",
+    "user": "codex",
+    "timestamp": "2026-05-02T18:16:04+02:00",
+    "changes": {
+      "summary": "Implemented backend hard delete for pagos, ingresos and gastos.",
+      "code": [
+        "Added sheetsRepository.findById() and repo.delete alias over deleteRow().",
+        "Replaced service cancel() exports with remove() in pagos, ingresos and gastos.",
+        "DELETE routes keep requireAdmin and no longer validate a body or require motivo.",
+        "Added GET /:id routes for pagos, ingresos and gastos so deleted records return a real 404."
+      ],
+      "audit_behavior": "DELETE logs action='delete' with changes.before snapshot and no after/motivo payload.",
+      "compatibility": "The estado field remains in movement schemas and balance still excludes historical estado='anulado' rows.",
+      "tests": [
+        "node --test tests/pagos-update-cancel.test.js tests/movements-update-cancel.test.js tests/auth-gate-routes.test.js tests/balance-excludes-anulled.test.js",
+        "npm run lint",
+        "npm test (139 tests)",
+        "npm run build --if-present"
+      ],
+      "docs": [
+        "tasks/TICKET-085-backend-hard-delete-pagos-ingresos-gastos.md",
+        "tasks/BACKLOG.md",
+        "docs/architecture.md",
+        "docs/decisions.md",
+        "docs/PRD.md",
+        "context/memory/state.md"
+      ]
+    }
+  },
+  "log": {
+    "status": "stored"
+  }
+}

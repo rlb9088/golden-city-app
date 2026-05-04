@@ -1,0 +1,35 @@
+{
+  "event": {
+    "action": "update",
+    "entity": "ticket:TICKET-093-foundation-totales-por-caja-schema",
+    "user": "codex",
+    "timestamp": "2026-05-04T23:02:20+02:00",
+    "changes": {
+      "summary": "Implemented the shared Sheets foundation for the Sprint 17 totales por caja pattern.",
+      "code": [
+        "Added depositos_totales, retiros_totales, bonos_totales and retiros_no_pagados to backend/config/sheetsSchema.js.",
+        "Exported TOTALES_POR_CAJA_HEADERS as the shared sheet shape for the four modules.",
+        "Made backend/scripts/setupSheets.js skip header rewrites when a sheet is already aligned and guarded direct execution with require.main.",
+        "Added backend/tests/setupSheets.test.js and wired it into backend/package.json test."
+      ],
+      "docs": [
+        "tasks/TICKET-093-foundation-totales-por-caja-schema.md",
+        "tasks/BACKLOG.md",
+        "docs/architecture.md",
+        "context/memory/state.md"
+      ],
+      "validation": [
+        "npm run lint",
+        "npm test (142 tests)",
+        "npm run build --if-present"
+      ],
+      "status": {
+        "ticket": "COMPLETADO",
+        "foundation": "READY_FOR_T094"
+      }
+    }
+  },
+  "log": {
+    "status": "stored"
+  }
+}
