@@ -407,9 +407,36 @@
   }
 
   #balance-page .balance-caja-table {
-    min-width: 720px;
-    width: max-content;
-    table-layout: auto;
+    min-width: 0;
+    width: 100%;
+    table-layout: fixed;
+    font-size: 0.82rem;
+  }
+
+  #balance-page .balance-caja-table th,
+  #balance-page .balance-caja-table td {
+    padding: 8px 6px;
+  }
+
+  #balance-page .balance-caja-table th:first-child,
+  #balance-page .balance-caja-table td:first-child {
+    width: 34%;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  #balance-page .balance-caja-table th:not(:first-child),
+  #balance-page .balance-caja-table td:not(:first-child) {
+    width: 22%;
+  }
+
+  #balance-page .balance-caja-table .amount {
+    font-size: 0.78rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: inline-block;
+    max-width: 100%;
   }
 
   #balance-page .table th,
@@ -487,7 +514,20 @@
   }
 
   #balance-page .balance-caja-table .balance-caja-cell {
-    min-width: 240px;
+    min-width: 0;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  #balance-page .balance-caja-table .balance-caja-name {
+    font-size: 0.85rem;
+    line-height: 1.15;
+  }
+
+  #balance-page .balance-caja-table .balance-caja-orphan {
+    font-size: 0.65rem;
+    padding: 2px 6px;
   }
 
   #agent-balance-table .balance-details-summary,

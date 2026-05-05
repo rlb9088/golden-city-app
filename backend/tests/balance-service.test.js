@@ -621,7 +621,7 @@ test('getBalanceAt calcula retiros reales del dia restando retiros no pagados de
   assert.equal(result.balanceIngresosDia, -86);
 });
 
-test('getBalanceAt acumulado usa el ultimo snapshot por caja y fecha mas reciente', async () => {
+test('getBalanceAt acumulado suma los montos de todos los dias hasta la fecha por caja', async () => {
   const service = loadBalanceService({
     depositosTotales: [
       { id: 'DPT-1', fecha: '2026-04-17', caja_id: 'CJ-1', caja: 'Caja 1', monto: 50, _rowIndex: 1 },
@@ -648,37 +648,44 @@ test('getBalanceAt acumulado usa el ultimo snapshot por caja y fecha mas recient
 
   const result = await service.getBalanceAt({ fecha: '2026-04-19' });
 
+  // CJ-1 depositos: 50 (17/04) + 80 (19/04, ultimo UPSERT) = 130; CJ-2: 10 (18/04)
   assert.deepStrictEqual(result.depositosAcum, {
-    total: 90,
+    total: 140,
     detalle: [
-      { caja_id: 'CJ-1', caja: 'Caja 1', monto: 80 },
+      { caja_id: 'CJ-1', caja: 'Caja 1', monto: 130 },
       { caja_id: 'CJ-2', caja: 'Caja 2', monto: 10 },
     ],
   });
+  // CJ-1 bonos: 2 (18/04) + 5 (19/04) = 7; CJ-2: 1 (18/04)
   assert.deepStrictEqual(result.bonosAcum, {
-    total: 6,
+    total: 8,
     detalle: [
-      { caja_id: 'CJ-1', caja: 'Caja 1', monto: 5 },
+      { caja_id: 'CJ-1', caja: 'Caja 1', monto: 7 },
       { caja_id: 'CJ-2', caja: 'Caja 2', monto: 1 },
     ],
   });
+  // CJ-1 retiros: 20 (17/04) + 40 (19/04) = 60; CJ-2: 20 (18/04)
   assert.deepStrictEqual(result.retirosAcum, {
-    total: 60,
+    total: 80,
     detalle: [
-      { caja_id: 'CJ-1', caja: 'Caja 1', monto: 40 },
+      { caja_id: 'CJ-1', caja: 'Caja 1', monto: 60 },
       { caja_id: 'CJ-2', caja: 'Caja 2', monto: 20 },
     ],
   });
+  // CJ-1 RNP: 3 (18/04) + 4 (19/04) = 7; CJ-2: 1 (18/04)
   assert.deepStrictEqual(result.retirosNoPagadosAcum, {
-    total: 5,
+    total: 8,
     detalle: [
-      { caja_id: 'CJ-1', caja: 'Caja 1', monto: 4 },
+      { caja_id: 'CJ-1', caja: 'Caja 1', monto: 7 },
       { caja_id: 'CJ-2', caja: 'Caja 2', monto: 1 },
     ],
   });
-  assert.equal(result.depositosRealesAcumulado, 84);
-  assert.equal(result.retirosRealesAcumulado, 55);
-  assert.equal(result.balanceIngresosAcumulado, 29);
+  // 140 - 8 = 132
+  assert.equal(result.depositosRealesAcumulado, 132);
+  // 80 - 8 = 72
+  assert.equal(result.retirosRealesAcumulado, 72);
+  // 132 - 72 = 60
+  assert.equal(result.balanceIngresosAcumulado, 60);
 });
 
 test('getBalanceAt expone cajas configuradas en cero cuando no hay movimientos', async () => {

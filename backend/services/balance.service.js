@@ -241,7 +241,7 @@ function isAllowedBankId(bankId, allowedBankIds) {
 }
 
 function buildLatestTotalsByCaja(rows, targetDate, { exactDate = false } = {}) {
-  const latestByCaja = new Map();
+  const dedupedByDateCaja = new Map();
 
   for (const row of rows) {
     if (!isActivo(row)) {
@@ -262,28 +262,33 @@ function buildLatestTotalsByCaja(rows, targetDate, { exactDate = false } = {}) {
       continue;
     }
 
-    const current = latestByCaja.get(cajaId);
+    const key = `${rowDate}::${cajaId}`;
+    const current = dedupedByDateCaja.get(key);
     const rowIndex = Number(row?._rowIndex ?? 0);
 
-    if (
-      !current
-      || rowDate > current.rowDate
-      || (rowDate === current.rowDate && rowIndex > current.rowIndex)
-    ) {
-      latestByCaja.set(cajaId, {
-        row,
-        rowDate,
-        rowIndex,
-      });
+    if (!current || rowIndex > current.rowIndex) {
+      dedupedByDateCaja.set(key, { row, rowIndex });
     }
   }
 
-  const detalle = [...latestByCaja.values()]
-    .map(({ row }) => ({
+  const byCaja = new Map();
+  for (const { row } of dedupedByDateCaja.values()) {
+    const cajaId = normalizeLookup(row.caja_id);
+    const entry = byCaja.get(cajaId) || {
       caja_id: normalizeText(row.caja_id),
       caja: normalizeText(row.caja) || normalizeText(row.caja_id),
-      monto: parseAmount(row.monto),
-    }))
+      monto: 0,
+    };
+
+    entry.monto += parseAmount(row.monto);
+    if (!entry.caja) {
+      entry.caja = normalizeText(row.caja) || normalizeText(row.caja_id);
+    }
+
+    byCaja.set(cajaId, entry);
+  }
+
+  const detalle = [...byCaja.values()]
     .sort((a, b) => String(a.caja ?? '').localeCompare(String(b.caja ?? ''), 'es', { sensitivity: 'base' })
       || String(a.caja_id ?? '').localeCompare(String(b.caja_id ?? ''), 'es', { sensitivity: 'base' }));
 
