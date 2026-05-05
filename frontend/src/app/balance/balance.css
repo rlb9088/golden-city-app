@@ -407,36 +407,26 @@
   }
 
   #balance-page .balance-caja-table {
-    min-width: 0;
-    width: 100%;
-    table-layout: fixed;
+    min-width: 480px;
+    width: max-content;
+    table-layout: auto;
     font-size: 0.82rem;
   }
 
   #balance-page .balance-caja-table th,
   #balance-page .balance-caja-table td {
-    padding: 8px 6px;
+    padding: 8px 10px;
   }
 
   #balance-page .balance-caja-table th:first-child,
   #balance-page .balance-caja-table td:first-child {
-    width: 34%;
-    word-break: break-word;
-    overflow-wrap: anywhere;
-  }
-
-  #balance-page .balance-caja-table th:not(:first-child),
-  #balance-page .balance-caja-table td:not(:first-child) {
-    width: 22%;
+    width: auto;
+    min-width: 110px;
   }
 
   #balance-page .balance-caja-table .amount {
-    font-size: 0.78rem;
+    font-size: 0.8rem;
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: inline-block;
-    max-width: 100%;
   }
 
   #balance-page .table th,
