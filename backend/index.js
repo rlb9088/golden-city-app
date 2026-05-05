@@ -8,6 +8,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const authService = require('./services/auth.service');
+const sheetsBootstrap = require('./services/sheetsBootstrap.service');
 const logger = require('./lib/logger');
 
 const app = express();
@@ -124,6 +125,13 @@ app.use('/api/audit', require('./routes/audit.routes'));
 app.use('/api/ocr', require('./routes/ocr.routes'));
 
 if (process.env.NODE_ENV !== 'test') {
+  void sheetsBootstrap.ensureSchemaAligned().catch((error) => {
+    logger.warn('Could not bootstrap sheets schema', {
+      context: { component: 'sheets.bootstrap' },
+      error,
+    });
+  });
+
   void authService.ensureAuthSheetSeed().catch((error) => {
     if (String(error?.message || '').startsWith('FATAL:')) {
       logger.error('Invalid auth configuration during bootstrap', {

@@ -8,6 +8,29 @@ const bonosTotalesService = require('./bonos-totales.service');
 const retirosNoPagadosService = require('./retiros-no-pagados.service');
 const { getTable, getAdminBankIds, getAgentBankIds, getSetting, getCajaInicioMesByBanco } = require('./config.service');
 const { todayLima } = require('../config/timezone');
+const logger = require('../lib/logger');
+
+const TOTALES_POR_CAJA_SHEETS = new Set([
+  'depositos_totales',
+  'retiros_totales',
+  'bonos_totales',
+  'retiros_no_pagados',
+]);
+
+async function readTotalesPorCajaRows(sheetName, loader) {
+  try {
+    return await loader();
+  } catch (error) {
+    if (TOTALES_POR_CAJA_SHEETS.has(sheetName)) {
+      logger.warn('Totales por caja sheet not available, returning empty rows', {
+        context: { component: 'balance.service', sheet: sheetName },
+        error,
+      });
+      return [];
+    }
+    throw error;
+  }
+}
 
 function normalizeText(value) {
   return String(value ?? '').trim();
@@ -372,7 +395,7 @@ async function getDepositosTotalesAt(fecha, { exactDate = false, context = null 
   const ctx = context || await loadBalanceContext();
   const { targetDate } = resolveRequestedDate(fecha, ctx.todayDate);
   return memoizeContext(ctx, `depositos_totales:${targetDate}:${exactDate}`, async () => {
-    const rows = await getCachedSheetRows(ctx, 'depositos_totales', () => depositosTotalesService.getAll());
+    const rows = await getCachedSheetRows(ctx, 'depositos_totales', () => readTotalesPorCajaRows('depositos_totales', () => depositosTotalesService.getAll()));
     return buildLatestTotalsByCaja(rows, targetDate, { exactDate });
   });
 }
@@ -381,7 +404,7 @@ async function getRetirosTotalesAt(fecha, { exactDate = false, context = null } 
   const ctx = context || await loadBalanceContext();
   const { targetDate } = resolveRequestedDate(fecha, ctx.todayDate);
   return memoizeContext(ctx, `retiros_totales:${targetDate}:${exactDate}`, async () => {
-    const rows = await getCachedSheetRows(ctx, 'retiros_totales', () => retirosTotalesService.getAll());
+    const rows = await getCachedSheetRows(ctx, 'retiros_totales', () => readTotalesPorCajaRows('retiros_totales', () => retirosTotalesService.getAll()));
     return buildLatestTotalsByCaja(rows, targetDate, { exactDate });
   });
 }
@@ -390,7 +413,7 @@ async function getBonosTotalesAt(fecha, { exactDate = false, context = null } = 
   const ctx = context || await loadBalanceContext();
   const { targetDate } = resolveRequestedDate(fecha, ctx.todayDate);
   return memoizeContext(ctx, `bonos_totales:${targetDate}:${exactDate}`, async () => {
-    const rows = await getCachedSheetRows(ctx, 'bonos_totales', () => bonosTotalesService.getAll());
+    const rows = await getCachedSheetRows(ctx, 'bonos_totales', () => readTotalesPorCajaRows('bonos_totales', () => bonosTotalesService.getAll()));
     return buildLatestTotalsByCaja(rows, targetDate, { exactDate });
   });
 }
@@ -399,7 +422,7 @@ async function getRetirosNoPagadosAt(fecha, { exactDate = false, context = null 
   const ctx = context || await loadBalanceContext();
   const { targetDate } = resolveRequestedDate(fecha, ctx.todayDate);
   return memoizeContext(ctx, `retiros_no_pagados:${targetDate}:${exactDate}`, async () => {
-    const rows = await getCachedSheetRows(ctx, 'retiros_no_pagados', () => retirosNoPagadosService.getAll());
+    const rows = await getCachedSheetRows(ctx, 'retiros_no_pagados', () => readTotalesPorCajaRows('retiros_no_pagados', () => retirosNoPagadosService.getAll()));
     return buildLatestTotalsByCaja(rows, targetDate, { exactDate });
   });
 }
@@ -408,10 +431,10 @@ async function getFirstDataDate(context = null) {
   const ctx = context || await loadBalanceContext();
   return memoizeContext(ctx, 'first_data_date', async () => {
     const [depositos, retiros, bonos, retirosNoPagados] = await Promise.all([
-      getCachedSheetRows(ctx, 'depositos_totales', () => depositosTotalesService.getAll()),
-      getCachedSheetRows(ctx, 'retiros_totales', () => retirosTotalesService.getAll()),
-      getCachedSheetRows(ctx, 'bonos_totales', () => bonosTotalesService.getAll()),
-      getCachedSheetRows(ctx, 'retiros_no_pagados', () => retirosNoPagadosService.getAll()),
+      getCachedSheetRows(ctx, 'depositos_totales', () => readTotalesPorCajaRows('depositos_totales', () => depositosTotalesService.getAll())),
+      getCachedSheetRows(ctx, 'retiros_totales', () => readTotalesPorCajaRows('retiros_totales', () => retirosTotalesService.getAll())),
+      getCachedSheetRows(ctx, 'bonos_totales', () => readTotalesPorCajaRows('bonos_totales', () => bonosTotalesService.getAll())),
+      getCachedSheetRows(ctx, 'retiros_no_pagados', () => readTotalesPorCajaRows('retiros_no_pagados', () => retirosNoPagadosService.getAll())),
     ]);
 
     const dates = [];
