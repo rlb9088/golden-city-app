@@ -1,0 +1,49 @@
+{
+  "event": {
+    "action": "update",
+    "entity": "frontend:pagos-ultimos-pagos",
+    "user": "codex",
+    "timestamp": "2026-07-11T07:55:45.6764249+02:00",
+    "changes": {
+      "summary": "Added the Caja value to the Ultimos Pagos summary table in the pagos page.",
+      "before": {
+        "tableColumns": [
+          "Comprobante",
+          "Fecha Registro",
+          "Fecha Comprobante",
+          "Usuario",
+          "Agente",
+          "Banco",
+          "Tipo",
+          "Monto",
+          "Acciones (admin)"
+        ]
+      },
+      "after": {
+        "tableColumns": [
+          "Comprobante",
+          "Fecha Registro",
+          "Fecha Comprobante",
+          "Usuario",
+          "Caja",
+          "Agente",
+          "Banco",
+          "Tipo",
+          "Monto",
+          "Acciones (admin)"
+        ],
+        "files": [
+          "frontend/src/app/pagos/page.tsx",
+          "frontend/src/app/pagos/pagos.css"
+        ],
+        "validation": [
+          "cd frontend && npm run typecheck",
+          "cd frontend && npm run lint"
+        ]
+      }
+    }
+  },
+  "log": {
+    "status": "stored"
+  }
+}

@@ -1108,6 +1108,7 @@ export default function PagosPage() {
                   <th>Fecha Registro</th>
                   <th>Fecha Comprobante</th>
                   <th>Usuario</th>
+                  <th>Caja</th>
                   <th>Agente</th>
                   <th>Banco</th>
                   <th>Tipo</th>
@@ -1145,6 +1146,9 @@ export default function PagosPage() {
                           posible duplicado
                         </span>
                       )}
+                    </td>
+                    <td>
+                      {p.caja ? <span className="badge">{p.caja}</span> : <span className="text-muted">-</span>}
                     </td>
                     <td>{p.agente}</td>
                     <td><span className="badge badge-blue">{p.banco}</span></td>
