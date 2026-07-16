@@ -97,6 +97,53 @@ function resolveAgentNameFromId(agents: ConfigAgent[], agentId?: string, fallbac
 const USUARIO_SUGGESTION_LIMIT = 20;
 
 const PAGE_SIZE = 50;
+const EXPORT_PAGE_SIZE = 500;
+
+const EXPORT_COLUMNS: Array<{ header: string; getValue: (pago: PagoRecord) => string | number | undefined }> = [
+  { header: 'ID', getValue: (pago) => pago.id },
+  { header: 'Estado', getValue: (pago) => pago.estado },
+  { header: 'Fecha registro', getValue: (pago) => pago.fecha_registro },
+  { header: 'Fecha comprobante', getValue: (pago) => pago.fecha_comprobante },
+  { header: 'Usuario', getValue: (pago) => pago.usuario },
+  { header: 'Caja', getValue: (pago) => pago.caja },
+  { header: 'Agente', getValue: (pago) => pago.agente },
+  { header: 'Banco ID', getValue: (pago) => pago.banco_id },
+  { header: 'Banco', getValue: (pago) => pago.banco },
+  { header: 'Tipo', getValue: (pago) => pago.tipo },
+  { header: 'Monto', getValue: (pago) => toAmountString(pago.monto).replace('.', ',') },
+  { header: 'Comprobante URL', getValue: (pago) => pago.comprobante_url },
+  { header: 'Comprobante File ID', getValue: (pago) => pago.comprobante_file_id },
+];
+
+function escapeCsvCell(value: string | number | undefined) {
+  const text = String(value ?? '');
+  if (/[;"\r\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+
+  return text;
+}
+
+function buildPagosCsv(rows: PagoRecord[]) {
+  const header = EXPORT_COLUMNS.map((column) => escapeCsvCell(column.header)).join(';');
+  const body = rows.map((row) => (
+    EXPORT_COLUMNS.map((column) => escapeCsvCell(column.getValue(row))).join(';')
+  ));
+
+  return ['\uFEFF' + header, ...body].join('\r\n');
+}
+
+function downloadTextFile(filename: string, content: string, type: string) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
 
 export default function PagosPage() {
   const { isAdmin, user } = useAuth();
@@ -118,6 +165,7 @@ export default function PagosPage() {
   const [loading, setLoading] = useState(true);
   const [pagosLoading, setPagosLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [exportingPagos, setExportingPagos] = useState(false);
   const [actionLoading, setActionLoading] = useState<{ type: 'edit' | 'delete'; id: string } | null>(null);
   const [alert, setAlert] = useState<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null);
   const [filters, setFilters] = useState<PagoFilters>({
@@ -475,6 +523,45 @@ export default function PagosPage() {
       if (!isNetworkError(err)) setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cambiar de pagina' });
     });
   }, [filters, loadPagosPage, pagination.hasMore, pagosLoading]);
+
+  const handleExportPagos = useCallback(async () => {
+    try {
+      setExportingPagos(true);
+
+      const exportedRows: PagoRecord[] = [];
+      let offset = 0;
+      let hasMore = true;
+
+      while (hasMore) {
+        const response = await getPagos({
+          ...filters,
+          limit: EXPORT_PAGE_SIZE,
+          offset,
+        });
+
+        exportedRows.push(...response.data.items);
+        hasMore = response.data.pagination.hasMore;
+        offset += response.data.pagination.limit;
+      }
+
+      if (exportedRows.length === 0) {
+        setAlert({ type: 'warning', message: 'No hay pagos para exportar con los filtros actuales.' });
+        return;
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+      downloadTextFile(
+        `pagos-${today}.csv`,
+        buildPagosCsv(exportedRows),
+        'text/csv;charset=utf-8',
+      );
+      setAlert({ type: 'success', message: `Exportados ${exportedRows.length} pagos a Excel.` });
+    } catch (err) {
+      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al exportar pagos' });
+    } finally {
+      setExportingPagos(false);
+    }
+  }, [filters]);
 
   const handleUpdatePago = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1011,6 +1098,14 @@ export default function PagosPage() {
             <span className="badge badge-blue">
               {pagos.length} de {totalPagos} resultados
             </span>
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={() => void handleExportPagos()}
+              disabled={pagosLoading || exportingPagos || totalPagos === 0}
+            >
+              {exportingPagos ? 'Exportando...' : 'Exportar Excel'}
+            </button>
             <button className="btn btn-secondary" type="button" onClick={resetFilters} disabled={!hasActiveFilters}>
               Limpiar filtros
             </button>
