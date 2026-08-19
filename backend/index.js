@@ -123,6 +123,7 @@ app.use('/api/balance', require('./routes/balance.routes'));
 app.use('/api/config', require('./routes/config.routes'));
 app.use('/api/audit', require('./routes/audit.routes'));
 app.use('/api/ocr', require('./routes/ocr.routes'));
+app.use('/api/clientes', require('./routes/clientes.routes'));
 
 if (process.env.NODE_ENV !== 'test') {
   void sheetsBootstrap.ensureSchemaAligned().catch((error) => {

@@ -9,6 +9,7 @@ import './Sidebar.css';
 const navItems = [
   { href: '/balance', label: 'Balance', icon: '📊', adminOnly: false },
   { href: '/pagos', label: 'Pagos', icon: '💳', adminOnly: false },
+  { href: '/clientes', label: 'Clientes', icon: '👥', adminOnly: false },
   { href: '/ingresos', label: 'Ingresos', icon: '💰', adminOnly: true },
   { href: '/gastos', label: 'Gastos', icon: '📤', adminOnly: true },
   { href: '/bancos', label: 'Bancos', icon: '🏦', adminOnly: true },

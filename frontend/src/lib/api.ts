@@ -189,6 +189,35 @@ export interface AuditRecord {
   changes: Record<string, unknown> | string;
 }
 
+export interface ClienteRecord {
+  id: string;
+  estado: string;
+  nombre: string;
+  player_id?: string;
+  fecha_alta?: string;
+  origen?: string;
+  dni?: string;
+  fecha_nacimiento?: string;
+  edad?: string | number;
+  correos: string[];
+  telefonos: string[];
+  ips: string[];
+  ciudad?: string;
+  ciudad_ip?: string;
+  ip_city_status?: string;
+  accesos: Record<string, unknown>;
+  actualizado_en?: string;
+  actualizado_por?: string;
+}
+
+export interface ClientesFilters {
+  q?: string;
+  estado?: string;
+  ciudad?: string;
+  limit?: number;
+  offset?: number;
+}
+
 export class ApiError extends Error {
   kind: 'network' | 'timeout' | 'http' | 'parse';
   status?: number;
@@ -886,6 +915,54 @@ export async function getAuditLogs(filters: AuditFilters = {}) {
   const query = params.toString();
   const suffix = query ? `?${query}` : '';
   return request<{ status: string; data: PaginatedResponse<AuditRecord> }>(`/api/audit${suffix}`);
+}
+
+export async function getClientes(filters: ClientesFilters = {}) {
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      params.set(key, String(value));
+    }
+  });
+
+  const query = params.toString();
+  const suffix = query ? `?${query}` : '';
+  return request<{ status: string; data: PaginatedResponse<ClienteRecord> }>(`/api/clientes${suffix}`);
+}
+
+export async function createCliente(data: Record<string, unknown>) {
+  return request<{ status: string; data: ClienteRecord }>('/api/clientes', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateCliente(id: string, data: Record<string, unknown>) {
+  return request<{ status: string; data: ClienteRecord }>(`/api/clientes/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function importClientes(items: Record<string, unknown>[], source = 'frontend_bulk_import') {
+  return request<{ status: string; data: { created: ClienteRecord[]; updated: ClienteRecord[]; count: number } }>('/api/clientes/import', {
+    method: 'POST',
+    body: JSON.stringify({ items, source }),
+  });
+}
+
+export async function downloadClientesExport(format: 'csv' | 'xls') {
+  const res = await fetch(`${API_BASE}/api/clientes/export?format=${format}`, {
+    headers: getHeaders(),
+  });
+
+  if (!res.ok) {
+    const payload = await res.json().catch(() => null);
+    throw new ApiError(payload?.error || `HTTP ${res.status}`, 'http', res.status);
+  }
+
+  return res.blob();
 }
 
 // Balance
