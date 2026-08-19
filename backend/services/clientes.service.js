@@ -1,6 +1,7 @@
 const repo = require('../repositories/sheetsRepository');
 const audit = require('./audit.service');
-const { nowLima } = require('../config/timezone');
+const ExcelJS = require('exceljs');
+const { nowLima, todayLima } = require('../config/timezone');
 const { paginateItems } = require('../utils/pagination');
 const { createPrefixedId } = require('../utils/id');
 const { BadRequestError, NotFoundError } = require('../utils/appError');
@@ -45,8 +46,16 @@ const EXCEL_HEADER_MAP = {
   Ciudad: 'ciudad',
 };
 
+function repairMojibake(value) {
+  return String(value ?? '')
+    .replace(/Ã([\u0080-\u00BF])/g, (_, suffix) => Buffer.from([0xC3, suffix.charCodeAt(0)]).toString('utf8'))
+    .replace(/Â([\u0080-\u00BF])/g, (_, suffix) => Buffer.from([0xC2, suffix.charCodeAt(0)]).toString('utf8'))
+    .replace(/â€™/g, "'")
+    .replace(/â€“|â€”/g, '-');
+}
+
 function normalizeText(value) {
-  return String(value ?? '').trim();
+  return repairMojibake(value).replace(/[\u0000-\u001F\u007F]/g, '').trim();
 }
 
 function normalizeLookup(value) {
@@ -81,6 +90,25 @@ function normalizeEmail(value) {
   return normalizeText(value).toLowerCase();
 }
 
+function normalizeHeader(value) {
+  return normalizeText(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function getNumberedValues(input, prefix, maximum = 4) {
+  const values = [];
+  for (const [key, value] of Object.entries(input || {})) {
+    const normalizedKey = normalizeHeader(key);
+    for (let index = 1; index <= maximum; index += 1) {
+      if (normalizedKey === `${prefix}${index}`) values.push(value);
+    }
+  }
+  return values;
+}
+
 function collectEmails(input) {
   return compactUnique([
     input.correos || [],
@@ -90,6 +118,7 @@ function collectEmails(input) {
     input.correo_1,
     input.correo_2,
     input.correo_3,
+    getNumberedValues(input, 'correo', 6),
   ]).map(normalizeEmail).filter(Boolean);
 }
 
@@ -116,6 +145,7 @@ function collectPhones(input) {
     input.Telefono_2,
     input.Telefono_3,
     input.Telefono_4,
+    getNumberedValues(input, 'telefono', 8),
   ]).map(normalizePhone).filter(Boolean);
 }
 
@@ -129,11 +159,29 @@ function collectIps(input) {
 function normalizeDateOnly(value) {
   const text = normalizeText(value);
   if (!text) return '';
+  if (/^\d{4,5}(?:\.0+)?$/.test(text)) {
+    const serial = Number(text);
+    if (serial >= 1 && serial <= 100000) {
+      const date = new Date(Date.UTC(1899, 11, 30) + Math.round(serial) * 24 * 60 * 60 * 1000);
+      return date.toISOString().slice(0, 10);
+    }
+  }
   const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
   const local = text.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
   if (local) return `${local[3]}-${local[2]}-${local[1]}`;
   return text;
+}
+
+function calculateAge(dateOfBirth, asOfDate = todayLima()) {
+  const birth = normalizeDateOnly(dateOfBirth);
+  const today = normalizeDateOnly(asOfDate);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(birth) || !/^\d{4}-\d{2}-\d{2}$/.test(today)) return '';
+  const [birthYear, birthMonth, birthDay] = birth.split('-').map(Number);
+  const [todayYear, todayMonth, todayDay] = today.split('-').map(Number);
+  let age = todayYear - birthYear;
+  if (todayMonth < birthMonth || (todayMonth === birthMonth && todayDay < birthDay)) age -= 1;
+  return age >= 0 && age <= 130 ? age : '';
 }
 
 function normalizeAccesses(input) {
@@ -229,7 +277,24 @@ function parseReadableCliente(row = {}) {
 }
 
 function normalizeForRead(row) {
-  return parseReadableCliente(row);
+  const readable = parseReadableCliente(row);
+  const raw = readable.raw && typeof readable.raw === 'object' ? readable.raw : {};
+  const source = { ...raw, ...readable };
+  const fechaNacimiento = normalizeDateOnly(readable.fecha_nacimiento || raw.Fecha_nacimiento);
+
+  return {
+    ...readable,
+    nombre: normalizeText(readable.nombre || raw.Nombre),
+    fecha_alta: normalizeDateOnly(readable.fecha_alta || raw.Fecha_alta),
+    fecha_nacimiento: fechaNacimiento,
+    edad: calculateAge(fechaNacimiento),
+    correos: collectEmails(source),
+    telefonos: collectPhones(source),
+    ips: collectIps(source),
+    ciudad: normalizeText(readable.ciudad || raw.Ciudad),
+    ciudad_ip: normalizeText(readable.ciudad_ip),
+    accesos: normalizeAccesses(source),
+  };
 }
 
 function findDuplicate(rows, candidate, currentId = null) {
@@ -418,44 +483,237 @@ async function getHistory(clienteId) {
 }
 
 function escapeCsvCell(value) {
-  const text = Array.isArray(value) || (value && typeof value === 'object') ? JSON.stringify(value) : String(value ?? '');
+  const text = String(value ?? '');
   return /[;"\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
+const EXPORT_COLUMNS = [
+  ['id', 'ID'],
+  ['estado', 'Estado'],
+  ['nombre', 'Nombre'],
+  ['player_id', 'Player ID'],
+  ['fecha_alta', 'Fecha de alta'],
+  ['origen', 'Origen'],
+  ['dni', 'DNI'],
+  ['fecha_nacimiento', 'Fecha de nacimiento'],
+  ['edad', 'Edad'],
+  ['correo_1', 'Correo 1'],
+  ['correo_2', 'Correo 2'],
+  ['correo_3', 'Correo 3'],
+  ['telefono_1', 'Telefono 1'],
+  ['telefono_2', 'Telefono 2'],
+  ['telefono_3', 'Telefono 3'],
+  ['telefono_4', 'Telefono 4'],
+  ['ips', 'IPs'],
+  ['ciudad', 'Ciudad declarada'],
+  ['ciudad_ip', 'Ciudad IP'],
+  ['ip_city_status', 'Estado ciudad IP'],
+  ['slots_usuario', 'Slots usuario'],
+  ['slots_id', 'Slots ID'],
+  ['slots_clave', 'Slots clave'],
+  ['apueston_usuario', 'Apueston usuario'],
+  ['apueston_id', 'Apueston ID'],
+  ['apueston_clave', 'Apueston clave'],
+  ['apueston_link_auth', 'Apueston link auth'],
+  ['calidad', 'Calidad'],
+  ['actualizado_en', 'Ultima actualizacion'],
+];
+
+function formatDateForExport(value) {
+  const normalized = normalizeDateOnly(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return '';
+  const [year, month, day] = normalized.split('-');
+  return `${day}/${month}/${year}`;
+}
+
+function dateForWorkbook(value) {
+  const normalized = normalizeDateOnly(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return null;
+  return new Date(`${normalized}T00:00:00Z`);
+}
+
+function formatPhoneForExport(value) {
+  const normalized = normalizePhone(value);
+  if (/^\+51\d{9}$/.test(normalized)) return `+51 ${normalized.slice(3, 6)} ${normalized.slice(6, 9)} ${normalized.slice(9)}`;
+  return normalized;
+}
+
+function safeSpreadsheetText(value) {
+  // XLSX stores regular string cells as text, so phone numbers and IDs keep
+  // their exact value without Excel interpreting leading plus signs as formulas.
+  return String(value ?? '');
+}
+
+function excelColumnName(index) {
+  let value = index;
+  let result = '';
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    result = String.fromCharCode(65 + remainder) + result;
+    value = Math.floor((value - 1) / 26);
+  }
+  return result;
+}
+
+function buildExportRecord(row) {
+  const correos = row.correos || [];
+  const telefonos = row.telefonos || [];
+  const accesos = row.accesos || {};
+  const slots = accesos.slots || {};
+  const apueston = accesos.apueston || {};
+  const quality = row.calidad || {};
+
+  return {
+    id: row.id,
+    estado: row.estado,
+    nombre: row.nombre,
+    player_id: row.player_id,
+    fecha_alta: row.fecha_alta,
+    origen: row.origen,
+    dni: row.dni,
+    fecha_nacimiento: row.fecha_nacimiento,
+    edad: row.edad,
+    correo_1: correos[0] || '',
+    correo_2: correos[1] || '',
+    correo_3: correos[2] || '',
+    telefono_1: formatPhoneForExport(telefonos[0]),
+    telefono_2: formatPhoneForExport(telefonos[1]),
+    telefono_3: formatPhoneForExport(telefonos[2]),
+    telefono_4: formatPhoneForExport(telefonos[3]),
+    ips: (row.ips || []).join('; '),
+    ciudad: row.ciudad,
+    ciudad_ip: row.ciudad_ip,
+    ip_city_status: row.ip_city_status,
+    slots_usuario: slots.usuario || '',
+    slots_id: slots.id || '',
+    slots_clave: slots.clave || '',
+    apueston_usuario: apueston.usuario || '',
+    apueston_id: apueston.id || '',
+    apueston_clave: apueston.clave || '',
+    apueston_link_auth: apueston.link_auth || '',
+    calidad: [quality.status, quality.score ? `${quality.score}/100` : '', ...(quality.issues || []), ...(quality.warnings || [])]
+      .filter(Boolean)
+      .join(' | '),
+    actualizado_en: row.actualizado_en,
+  };
+}
+
 function toExportRows(rows) {
-  const columns = ['id', 'estado', 'nombre', 'player_id', 'fecha_alta', 'origen', 'dni', 'fecha_nacimiento', 'edad', 'correos', 'telefonos', 'ips', 'ciudad', 'ciudad_ip', 'ip_city_status', 'calidad', 'accesos', 'actualizado_en'];
-  const readable = rows.map(normalizeForRead);
+  const columns = EXPORT_COLUMNS.map(([key]) => key);
+  const readable = rows.map(normalizeForRead).map(buildExportRecord);
   return {
     columns,
     readable,
     csv: [
-      `\uFEFF${columns.map(escapeCsvCell).join(';')}`,
-      ...readable.map((row) => columns.map((column) => escapeCsvCell(row[column])).join(';')),
+      `\uFEFF${EXPORT_COLUMNS.map(([, label]) => escapeCsvCell(label)).join(';')}`,
+      ...readable.map((row) => columns.map((column) => escapeCsvCell(
+        column === 'fecha_alta' || column === 'fecha_nacimiento'
+          ? formatDateForExport(row[column])
+          : row[column],
+      )).join(';')),
     ].join('\r\n'),
   };
 }
 
+async function buildXlsxExport(rows) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Golden City';
+  workbook.created = new Date();
+  const sheet = workbook.addWorksheet('Clientes', { views: [{ state: 'frozen', ySplit: 1 }] });
+  sheet.columns = EXPORT_COLUMNS.map(([key, header]) => ({ key, header, width: Math.min(Math.max(header.length + 2, 14), 32) }));
+  sheet.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1B1D3A' } };
+  sheet.autoFilter = { from: 'A1', to: `${excelColumnName(EXPORT_COLUMNS.length)}1` };
+
+  rows.map(normalizeForRead).map(buildExportRecord).forEach((record, index) => {
+    const row = sheet.addRow(EXPORT_COLUMNS.map(([key]) => {
+      if (key === 'fecha_alta' || key === 'fecha_nacimiento') return dateForWorkbook(record[key]) || '';
+      if (key === 'edad') return record.fecha_nacimiento ? { formula: `IF(H${index + 2}=\"\",\"\",DATEDIF(H${index + 2},TODAY(),\"Y\"))` } : '';
+      return safeSpreadsheetText(record[key]);
+    }));
+    row.getCell(5).numFmt = 'dd/mm/yyyy';
+    row.getCell(8).numFmt = 'dd/mm/yyyy';
+  });
+
+  sheet.getColumn(3).width = 34;
+  sheet.getColumn(17).width = 44;
+  sheet.getColumn(27).width = 54;
+  sheet.getColumn(28).width = 30;
+  sheet.eachRow((row) => {
+    row.alignment = { vertical: 'top', wrapText: true };
+  });
+  return workbook.xlsx.writeBuffer();
+}
+
 async function exportData(format = 'csv') {
   const rows = await repo.getAll(SHEET_NAME);
-  const { columns, readable, csv } = toExportRows(rows);
+  const { csv } = toExportRows(rows);
   if (format === 'xls') {
-    const header = columns.map((column) => `<th>${escapeHtml(column)}</th>`).join('');
-    const body = readable.map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(Array.isArray(row[column]) || typeof row[column] === 'object' ? JSON.stringify(row[column]) : row[column])}</td>`).join('')}</tr>`).join('');
     return {
-      contentType: 'application/vnd.ms-excel; charset=utf-8',
-      filename: 'clientes.xls',
-      body: `\uFEFF<table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>`,
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      filename: 'clientes.xlsx',
+      body: await buildXlsxExport(rows),
     };
   }
   return { contentType: 'text/csv; charset=utf-8', filename: 'clientes.csv', body: csv };
 }
 
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+function getRepairableFields(row) {
+  return {
+    nombre: row.nombre,
+    fecha_alta: row.fecha_alta,
+    fecha_nacimiento: row.fecha_nacimiento,
+    correos_json: row.correos_json,
+    telefonos_json: row.telefonos_json,
+    ips_json: row.ips_json,
+    ciudad: row.ciudad,
+    accesos_json: row.accesos_json,
+  };
+}
+
+async function repairImportedData(user = 'system_data_repair', options = {}) {
+  const rows = await repo.getAll(SHEET_NAME);
+  const updates = [];
+  const historyEntries = [];
+
+  for (const row of rows) {
+    const readable = normalizeForRead(row);
+    const next = {
+      ...row,
+      nombre: readable.nombre,
+      fecha_alta: readable.fecha_alta,
+      fecha_nacimiento: readable.fecha_nacimiento,
+      correos_json: JSON.stringify(readable.correos || []),
+      telefonos_json: JSON.stringify(readable.telefonos || []),
+      ips_json: JSON.stringify(readable.ips || []),
+      ciudad: readable.ciudad,
+      accesos_json: JSON.stringify(readable.accesos || {}),
+      actualizado_en: nowLima(),
+      actualizado_por: user,
+    };
+    const before = getRepairableFields(row);
+    const after = getRepairableFields(next);
+    if (JSON.stringify(before) === JSON.stringify(after)) continue;
+
+    updates.push({ rowIndex: row._rowIndex, data: next });
+    historyEntries.push(buildHistoryEntry('data_repair', row.id, user, before, after, 'clientes_data_repair'));
+  }
+
+  if (!options.dryRun && updates.length > 0) {
+    await repo.updateBatch(SHEET_NAME, updates, HEADERS);
+    await repo.appendBatch(HISTORY_SHEET_NAME, historyEntries);
+    await audit.log('update', 'clientes_data_repair', user, {
+      reviewed: rows.length,
+      updated: updates.length,
+      fields: ['nombre', 'fecha_alta', 'fecha_nacimiento', 'correos', 'telefonos', 'ips', 'ciudad', 'accesos'],
+    });
+  }
+
+  return {
+    reviewed: rows.length,
+    updated: updates.length,
+    dryRun: Boolean(options.dryRun),
+  };
 }
 
 function isLikelyEmail(value) {
@@ -597,8 +855,11 @@ module.exports = {
   HEADERS,
   HISTORY_HEADERS,
   normalizePhone,
+  normalizeDateOnly,
+  calculateAge,
   collectIps,
   normalizeClienteInput,
+  normalizeForRead,
   getPagedAndFiltered,
   getById,
   create,
@@ -606,5 +867,6 @@ module.exports = {
   importBatch,
   getHistory,
   exportData,
+  repairImportedData,
   runQualityReview,
 };
