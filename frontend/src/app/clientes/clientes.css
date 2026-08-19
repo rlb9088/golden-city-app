@@ -10,8 +10,24 @@
 
 .clientes-editor,
 .clientes-import,
+.clientes-admin-actions,
 .clientes-search {
   margin-bottom: var(--space-lg);
+}
+
+.clientes-admin-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.clientes-admin-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
 }
 
 .clientes-form,
@@ -51,15 +67,22 @@
 
 @media (max-width: 640px) {
   .clientes-actions,
+  .clientes-admin-buttons,
   .clientes-filter-actions,
   .clientes-form-actions {
     justify-content: stretch;
   }
 
   .clientes-actions .btn,
+  .clientes-admin-buttons .btn,
   .clientes-filter-actions .btn,
   .clientes-form-actions .btn {
     flex: 1;
+  }
+
+  .clientes-admin-actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .clientes-form,

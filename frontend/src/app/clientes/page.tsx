@@ -125,6 +125,8 @@ export default function ClientesPage() {
   const [form, setForm] = useState<ClienteForm>(emptyForm);
   const [editing, setEditing] = useState<ClienteRecord | null>(null);
   const [bulkText, setBulkText] = useState('');
+  const [showEditor, setShowEditor] = useState(false);
+  const [showBulkImport, setShowBulkImport] = useState(false);
 
   const currentPage = Math.floor(pagination.offset / pagination.limit);
   const hasFilters = Boolean(filters.q || filters.ciudad || filters.estado);
@@ -140,7 +142,13 @@ export default function ClientesPage() {
       setClientes(response.data.items);
       setPagination(response.data.pagination);
     } catch (err) {
-      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar clientes' });
+      const message = err instanceof Error ? err.message : 'Error al cargar clientes';
+      setAlert({
+        type: 'error',
+        message: message.includes('ruta solicitada no existe')
+          ? 'El backend de produccion aun no tiene activo el modulo Clientes. Falta desplegar Railway y preparar las hojas.'
+          : message,
+      });
     } finally {
       setLoading(false);
     }
@@ -174,6 +182,7 @@ export default function ClientesPage() {
       }
       setForm(emptyForm);
       setEditing(null);
+      setShowEditor(false);
       await loadPage(currentPage);
     } catch (err) {
       setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al guardar cliente' });
@@ -217,6 +226,7 @@ export default function ClientesPage() {
   const openEdit = (cliente: ClienteRecord) => {
     setEditing(cliente);
     setForm(formFromCliente(cliente));
+    setShowEditor(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -245,14 +255,56 @@ export default function ClientesPage() {
 
       {alert && <AlertBanner type={alert.type} message={alert.message} onDismiss={() => setAlert(null)} />}
 
+      <section className="card clientes-search">
+        <form className="clientes-filter-grid" onSubmit={handleFilterSubmit}>
+          <label className="field-group field-group--wide"><span className="label">Buscar</span><input className="input" value={String(filters.q || '')} onChange={(event) => setFilters((current) => ({ ...current, q: event.target.value }))} placeholder="Nombre, DNI, telefono, correo, IP o player ID" /></label>
+          <label className="field-group"><span className="label">Ciudad</span><input className="input" list="clientes-cities" value={String(filters.ciudad || '')} onChange={(event) => setFilters((current) => ({ ...current, ciudad: event.target.value }))} /></label>
+          <datalist id="clientes-cities">{visibleCities.map((city) => <option key={city} value={city} />)}</datalist>
+          <label className="field-group"><span className="label">Estado</span><select className="select" value={String(filters.estado || '')} onChange={(event) => setFilters((current) => ({ ...current, estado: event.target.value }))}><option value="">Todos</option><option value="activo">Activo</option><option value="inactivo">Inactivo</option></select></label>
+          <div className="clientes-filter-actions">
+            <button className="btn btn-primary" type="submit">Buscar</button>
+            <button className="btn btn-secondary" type="button" onClick={resetFilters} disabled={!hasFilters}>Limpiar</button>
+          </div>
+        </form>
+      </section>
+
       {isAdmin && (
+        <section className="card clientes-admin-actions">
+          <div>
+            <h2 className="balance-section-title">Gestion de clientes</h2>
+            <p className="page-subtitle">Crea clientes puntuales o importa la base oficial cuando el backend este listo.</p>
+          </div>
+          <div className="clientes-admin-buttons">
+            <button
+              className="btn btn-primary"
+              type="button"
+              onClick={() => {
+                setEditing(null);
+                setForm(emptyForm);
+                setShowEditor((current) => !current);
+              }}
+            >
+              {showEditor && !editing ? 'Ocultar formulario' : 'Nuevo cliente'}
+            </button>
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={() => setShowBulkImport((current) => !current)}
+            >
+              {showBulkImport ? 'Ocultar carga' : 'Carga masiva'}
+            </button>
+          </div>
+        </section>
+      )}
+
+      {isAdmin && showEditor && (
         <section className="card clientes-editor">
           <div className="section-heading">
             <div>
               <h2 className="balance-section-title">{editing ? 'Editar cliente' : 'Nuevo cliente'}</h2>
               <p className="page-subtitle">Telefonos, correos e IPs se separan con punto y coma.</p>
             </div>
-            {editing && <button className="btn btn-secondary" type="button" onClick={() => { setEditing(null); setForm(emptyForm); }}>Cancelar edicion</button>}
+            <button className="btn btn-secondary" type="button" onClick={() => { setEditing(null); setForm(emptyForm); setShowEditor(false); }}>{editing ? 'Cancelar edicion' : 'Cerrar'}</button>
           </div>
 
           <form className="clientes-form" onSubmit={handleSave}>
@@ -274,7 +326,7 @@ export default function ClientesPage() {
         </section>
       )}
 
-      {isAdmin && (
+      {isAdmin && showBulkImport && (
         <section className="card clientes-import">
           <div className="section-heading">
             <div>
@@ -291,19 +343,6 @@ export default function ClientesPage() {
           />
         </section>
       )}
-
-      <section className="card clientes-search">
-        <form className="clientes-filter-grid" onSubmit={handleFilterSubmit}>
-          <label className="field-group field-group--wide"><span className="label">Buscar</span><input className="input" value={String(filters.q || '')} onChange={(event) => setFilters((current) => ({ ...current, q: event.target.value }))} placeholder="Nombre, DNI, telefono, correo, IP o player ID" /></label>
-          <label className="field-group"><span className="label">Ciudad</span><input className="input" list="clientes-cities" value={String(filters.ciudad || '')} onChange={(event) => setFilters((current) => ({ ...current, ciudad: event.target.value }))} /></label>
-          <datalist id="clientes-cities">{visibleCities.map((city) => <option key={city} value={city} />)}</datalist>
-          <label className="field-group"><span className="label">Estado</span><select className="select" value={String(filters.estado || '')} onChange={(event) => setFilters((current) => ({ ...current, estado: event.target.value }))}><option value="">Todos</option><option value="activo">Activo</option><option value="inactivo">Inactivo</option></select></label>
-          <div className="clientes-filter-actions">
-            <button className="btn btn-primary" type="submit">Buscar</button>
-            <button className="btn btn-secondary" type="button" onClick={resetFilters} disabled={!hasFilters}>Limpiar</button>
-          </div>
-        </form>
-      </section>
 
       <section className="clientes-table-section">
         <div className="section-heading">
