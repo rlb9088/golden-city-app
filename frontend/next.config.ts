@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
-const productionBackendUrl = 'https://backend-production-bd77.up.railway.app';
+// Production API for this repository. It lives in the isolated Railway project
+// `golden-city-app-prod`, never in the unrelated `golden-city` project.
+const productionBackendUrl = 'https://api-production-dc6e.up.railway.app';
 const backendInternalUrl = process.env.NODE_ENV === 'production'
   ? productionBackendUrl
   : process.env.BACKEND_INTERNAL_URL || 'http://127.0.0.1:3001';
