@@ -196,7 +196,7 @@ export default function ClientesPage() {
       setAlert({
         type: 'error',
         message: message.includes('ruta solicitada no existe')
-          ? 'El backend de produccion aun no tiene activo el modulo Clientes. Falta desplegar Railway y preparar las hojas.'
+          ? 'No se pudo llegar a la API de clientes desde esta version publicada. Recarga la pagina e intenta de nuevo.'
           : message,
       });
     } finally {
@@ -351,7 +351,7 @@ export default function ClientesPage() {
         <section className="card clientes-admin-actions">
           <div>
             <h2 className="balance-section-title">Gestion de clientes</h2>
-            <p className="page-subtitle">Crea clientes puntuales o importa la base oficial cuando el backend este listo.</p>
+            <p className="page-subtitle">Crea clientes puntuales, revisa calidad o importa actualizaciones de la base oficial.</p>
           </div>
           <div className="clientes-admin-buttons">
             <button
