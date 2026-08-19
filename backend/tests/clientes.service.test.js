@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-function loadClientesService({ rows = [], historyRows = [], append, update, auditLog }) {
+function loadClientesService({ rows = [], historyRows = [], append, appendBatch, update, auditLog }) {
   const repoPath = require.resolve('../repositories/sheetsRepository');
   const auditPath = require.resolve('../services/audit.service');
   const servicePath = require.resolve('../services/clientes.service');
@@ -18,6 +18,7 @@ function loadClientesService({ rows = [], historyRows = [], append, update, audi
       getAll: async (sheetName) => (sheetName === 'clientes_historial' ? historyRows : rows),
       findById: async (sheetName, id) => rows.find((row) => sheetName === 'clientes' && row.id === id) || null,
       append: append || (async () => ({})),
+      appendBatch: appendBatch || (async () => ({})),
       update: update || (async () => ({})),
     },
   };
@@ -103,6 +104,10 @@ test('importBatch actualiza existentes por player_id y crea nuevos', async () =>
     rows,
     append: async (sheetName, data) => {
       appended.push({ sheetName, data });
+      return { status: 'success' };
+    },
+    appendBatch: async (sheetName, data) => {
+      data.forEach((row) => appended.push({ sheetName, data: row }));
       return { status: 'success' };
     },
     update: async (sheetName, rowIndex, data) => {

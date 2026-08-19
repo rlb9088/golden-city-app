@@ -262,8 +262,8 @@ function filterRows(rows, filters = {}) {
     && (!filters.ciudad || normalizeLookup(row.ciudad).includes(normalizeLookup(filters.ciudad))));
 }
 
-async function logHistory(action, clienteId, user, before, after, source = 'app') {
-  const entry = {
+function buildHistoryEntry(action, clienteId, user, before, after, source = 'app') {
+  return {
     id: createPrefixedId('CLH'),
     cliente_id: clienteId,
     action,
@@ -273,6 +273,10 @@ async function logHistory(action, clienteId, user, before, after, source = 'app'
     after_json: after ? JSON.stringify(after) : '',
     source,
   };
+}
+
+async function logHistory(action, clienteId, user, before, after, source = 'app') {
+  const entry = buildHistoryEntry(action, clienteId, user, before, after, source);
   await repo.append(HISTORY_SHEET_NAME, entry, HISTORY_HEADERS);
   return entry;
 }
@@ -333,6 +337,8 @@ async function importBatch(items, user = 'system', source = 'bulk_import') {
   const existingByDni = new Map(rows.filter((row) => normalizeText(row.dni)).map((row) => [normalizeLookup(row.dni), row]));
   const created = [];
   const updated = [];
+  const createdRecords = [];
+  const historyEntries = [];
 
   for (const item of items) {
     const probe = normalizeClienteInput(item, null, user);
@@ -345,19 +351,27 @@ async function importBatch(items, user = 'system', source = 'bulk_import') {
       await repo.update(SHEET_NAME, existing._rowIndex, nextRecord, HEADERS);
       const before = normalizeForRead(existing);
       const after = normalizeForRead(nextRecord);
-      await logHistory('update', existing.id, user, before, after, source);
+      historyEntries.push(buildHistoryEntry('update', existing.id, user, before, after, source));
       updated.push(after);
       existingByPlayerId.set(normalizeLookup(nextRecord.player_id), nextRecord);
       existingByDni.set(normalizeLookup(nextRecord.dni), nextRecord);
       continue;
     }
 
-    await repo.append(SHEET_NAME, probe, HEADERS);
     const readable = normalizeForRead(probe);
-    await logHistory('create', probe.id, user, null, readable, source);
+    createdRecords.push(probe);
+    historyEntries.push(buildHistoryEntry('create', probe.id, user, null, readable, source));
     created.push(readable);
     existingByPlayerId.set(normalizeLookup(probe.player_id), probe);
     existingByDni.set(normalizeLookup(probe.dni), probe);
+  }
+
+  if (createdRecords.length > 0) {
+    await repo.appendBatch(SHEET_NAME, createdRecords);
+  }
+
+  if (historyEntries.length > 0) {
+    await repo.appendBatch(HISTORY_SHEET_NAME, historyEntries);
   }
 
   await audit.log('import', 'clientes', user, {
