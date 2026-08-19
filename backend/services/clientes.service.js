@@ -110,7 +110,7 @@ function getNumberedValues(input, prefix, maximum = 4) {
 }
 
 function collectEmails(input) {
-  return compactUnique([
+  return compactUnique(compactUnique([
     input.correos || [],
     input.Correo_1,
     input.Correo_2,
@@ -119,7 +119,7 @@ function collectEmails(input) {
     input.correo_2,
     input.correo_3,
     getNumberedValues(input, 'correo', 6),
-  ]).map(normalizeEmail).filter(Boolean);
+  ]).map(normalizeEmail).filter(Boolean));
 }
 
 function normalizePhone(value) {
@@ -135,7 +135,7 @@ function normalizePhone(value) {
 }
 
 function collectPhones(input) {
-  return compactUnique([
+  return compactUnique(compactUnique([
     input.telefonos || [],
     input['Teléfono_1'],
     input['Teléfono_2'],
@@ -146,7 +146,7 @@ function collectPhones(input) {
     input.Telefono_3,
     input.Telefono_4,
     getNumberedValues(input, 'telefono', 8),
-  ]).map(normalizePhone).filter(Boolean);
+  ]).map(normalizePhone).filter(Boolean));
 }
 
 function collectIps(input) {
