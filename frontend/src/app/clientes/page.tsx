@@ -97,8 +97,9 @@ function downloadBlob(filename: string, blob: Blob) {
 function parseBulkText(value: string) {
   const text = value.trim();
   if (!text) return [];
-  if (text.startsWith('[')) {
-    return JSON.parse(text) as Record<string, unknown>[];
+  if (text.startsWith('[') || text.startsWith('{')) {
+    const parsed = JSON.parse(text) as Record<string, unknown>[] | { items?: Record<string, unknown>[] };
+    return Array.isArray(parsed) ? parsed : parsed.items || [];
   }
 
   const [headerLine, ...lines] = text.split(/\r?\n/).filter((line) => line.trim());
