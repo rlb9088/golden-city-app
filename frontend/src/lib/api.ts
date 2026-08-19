@@ -1,4 +1,8 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
+const PRODUCTION_API_BASE = 'https://backend-production-bd77.up.railway.app';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL
+  ?? (typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+    ? PRODUCTION_API_BASE
+    : '');
 const DEFAULT_TIMEOUT_MS = 15_000;
 const WARMUP_TIMEOUT_MS = 30_000;
 export const RETRY_DELAYS_MS = [250, 500, 1000, 2000, 4000];
