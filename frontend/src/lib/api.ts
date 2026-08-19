@@ -1,6 +1,6 @@
 const PRODUCTION_API_BASE = 'https://backend-production-bd77.up.railway.app';
 const API_BASE = process.env.NEXT_PUBLIC_API_URL
-  ?? (typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+  || (typeof window !== 'undefined' && window.location.hostname !== 'localhost'
     ? PRODUCTION_API_BASE
     : '');
 const DEFAULT_TIMEOUT_MS = 15_000;
