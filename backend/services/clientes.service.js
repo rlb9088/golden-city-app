@@ -348,6 +348,20 @@ async function importBatch(items, user = 'system', source = 'bulk_import') {
 
     if (existing) {
       const nextRecord = normalizeClienteInput(item, existing, user);
+      if (!existing._rowIndex) {
+        const createdIndex = createdRecords.findIndex((record) => record.id === existing.id);
+        if (createdIndex >= 0) {
+          createdRecords[createdIndex] = nextRecord;
+          created[createdIndex] = normalizeForRead(nextRecord);
+          const historyIndex = historyEntries.findIndex((entry) => entry.cliente_id === existing.id && entry.action === 'create');
+          if (historyIndex >= 0) {
+            historyEntries[historyIndex] = buildHistoryEntry('create', existing.id, user, null, created[createdIndex], source);
+          }
+        }
+        existingByPlayerId.set(normalizeLookup(nextRecord.player_id), nextRecord);
+        existingByDni.set(normalizeLookup(nextRecord.dni), nextRecord);
+        continue;
+      }
       await repo.update(SHEET_NAME, existing._rowIndex, nextRecord, HEADERS);
       const before = normalizeForRead(existing);
       const after = normalizeForRead(nextRecord);
