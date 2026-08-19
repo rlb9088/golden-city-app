@@ -9,6 +9,7 @@ router.get('/', verifyToken, requireAuth, controller.getAll);
 router.get('/export', verifyToken, requireAuth, controller.exportData);
 router.post('/', verifyToken, requireAdmin, validate(clienteCreateSchema), controller.create);
 router.post('/import', verifyToken, requireAdmin, validate(clienteImportSchema), controller.importBatch);
+router.post('/quality-review', verifyToken, requireAdmin, controller.runQualityReview);
 router.get('/:id', verifyToken, requireAuth, controller.getById);
 router.get('/:id/history', verifyToken, requireAuth, controller.getHistory);
 router.put('/:id', verifyToken, requireAdmin, validate(clienteUpdateSchema), controller.update);

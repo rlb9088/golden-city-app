@@ -8,9 +8,12 @@ import { useAuth } from '@/lib/auth-context';
 import {
   createCliente,
   downloadClientesExport,
+  getClienteHistory,
   getClientes,
   importClientes,
+  runClientesQualityReview,
   updateCliente,
+  type ClienteHistoryRecord,
   type ClienteRecord,
   type ClientesFilters,
 } from '@/lib/api';
@@ -114,6 +117,48 @@ function parseBulkText(value: string) {
   });
 }
 
+const fieldLabels: Record<string, string> = {
+  estado: 'Estado',
+  nombre: 'Nombre',
+  player_id: 'Player ID',
+  dni: 'DNI',
+  correos: 'Correos',
+  telefonos: 'Telefonos',
+  ips: 'IPs',
+  ciudad: 'Ciudad',
+  ciudad_ip: 'Ciudad IP',
+  ip_city_status: 'Estado IP',
+  accesos: 'Accesos',
+  calidad: 'Calidad',
+};
+
+function formatValue(value: unknown) {
+  if (value === undefined || value === null || value === '') return '-';
+  if (Array.isArray(value)) return value.length ? value.join('; ') : '-';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+function diffHistory(before: Partial<ClienteRecord> | null, after: Partial<ClienteRecord> | null) {
+  const keys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})]);
+  return Array.from(keys)
+    .filter((key) => !key.endsWith('_json') && key !== 'raw')
+    .map((key) => ({
+      key,
+      label: fieldLabels[key] || key,
+      before: formatValue(before?.[key as keyof ClienteRecord]),
+      after: formatValue(after?.[key as keyof ClienteRecord]),
+    }))
+    .filter((item) => item.before !== item.after);
+}
+
+function qualityLabel(status?: string) {
+  if (status === 'ok') return 'OK';
+  if (status === 'warning') return 'Revisar';
+  if (status === 'review') return 'Critico';
+  return 'Pendiente';
+}
+
 export default function ClientesPage() {
   const { isAdmin } = useAuth();
   const [clientes, setClientes] = useState<ClienteRecord[]>([]);
@@ -128,6 +173,10 @@ export default function ClientesPage() {
   const [bulkText, setBulkText] = useState('');
   const [showEditor, setShowEditor] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
+  const [qualityRunning, setQualityRunning] = useState(false);
+  const [historyCliente, setHistoryCliente] = useState<ClienteRecord | null>(null);
+  const [historyItems, setHistoryItems] = useState<ClienteHistoryRecord[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const currentPage = Math.floor(pagination.offset / pagination.limit);
   const hasFilters = Boolean(filters.q || filters.ciudad || filters.estado);
@@ -224,6 +273,35 @@ export default function ClientesPage() {
     }
   };
 
+  const handleQualityReview = async () => {
+    try {
+      setQualityRunning(true);
+      const response = await runClientesQualityReview();
+      setAlert({
+        type: 'success',
+        message: `Revision lista: ${response.data.reviewed} clientes revisados, ${response.data.resolvedCities} IPs con ciudad.`,
+      });
+      await loadPage(currentPage);
+    } catch (err) {
+      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'No se pudo revisar calidad/IPs' });
+    } finally {
+      setQualityRunning(false);
+    }
+  };
+
+  const openHistory = async (cliente: ClienteRecord) => {
+    try {
+      setHistoryCliente(cliente);
+      setHistoryLoading(true);
+      const response = await getClienteHistory(cliente.id);
+      setHistoryItems(response.data);
+    } catch (err) {
+      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'No se pudo cargar historial' });
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   const openEdit = (cliente: ClienteRecord) => {
     setEditing(cliente);
     setForm(formFromCliente(cliente));
@@ -276,6 +354,14 @@ export default function ClientesPage() {
             <p className="page-subtitle">Crea clientes puntuales o importa la base oficial cuando el backend este listo.</p>
           </div>
           <div className="clientes-admin-buttons">
+            <button
+              className="btn btn-secondary"
+              type="button"
+              onClick={() => void handleQualityReview()}
+              disabled={qualityRunning}
+            >
+              {qualityRunning ? 'Revisando...' : 'Revisar calidad/IPs'}
+            </button>
             <button
               className="btn btn-primary"
               type="button"
@@ -368,6 +454,7 @@ export default function ClientesPage() {
                   <th>Telefono</th>
                   <th>Correo</th>
                   <th>IP / Ciudad</th>
+                  <th>Calidad</th>
                   <th>Accesos</th>
                   {isAdmin && <th style={{ textAlign: 'right' }}>Acciones</th>}
                 </tr>
@@ -383,8 +470,19 @@ export default function ClientesPage() {
                       <td>{cliente.telefonos?.[0] || <span className="text-muted">-</span>}</td>
                       <td>{cliente.correos?.[0] || <span className="text-muted">-</span>}</td>
                       <td><strong>{cliente.ips?.[0] || '-'}</strong><div className="text-muted">{cliente.ciudad_ip || cliente.ciudad || cliente.ip_city_status || '-'}</div></td>
+                      <td>
+                        <span className={`badge quality-${cliente.calidad?.status || 'pending'}`}>
+                          {qualityLabel(cliente.calidad?.status)}
+                        </span>
+                        <div className="text-muted">{cliente.calidad?.score ?? '-'}/100</div>
+                      </td>
                       <td>{apueston.usuario ? <span className="badge badge-blue">{apueston.usuario}</span> : <span className="text-muted">-</span>}</td>
-                      {isAdmin && <td className="text-right"><button className="btn btn-secondary btn-sm" type="button" onClick={() => openEdit(cliente)}>Editar</button></td>}
+                      {isAdmin && (
+                        <td className="text-right clientes-row-actions">
+                          <button className="btn btn-secondary btn-sm" type="button" onClick={() => void openHistory(cliente)}>Historial</button>
+                          <button className="btn btn-secondary btn-sm" type="button" onClick={() => openEdit(cliente)}>Editar</button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -402,6 +500,52 @@ export default function ClientesPage() {
           />
         )}
       </section>
+
+      {historyCliente && (
+        <section className="card clientes-history">
+          <div className="section-heading">
+            <div>
+              <h2 className="balance-section-title">Historial de {historyCliente.nombre || historyCliente.id}</h2>
+              <p className="page-subtitle">Cambios guardados con usuario, fecha, origen y antes/despues.</p>
+            </div>
+            <button className="btn btn-secondary" type="button" onClick={() => { setHistoryCliente(null); setHistoryItems([]); }}>Cerrar</button>
+          </div>
+          {historyLoading ? (
+            <p className="text-muted">Cargando historial...</p>
+          ) : historyItems.length === 0 ? (
+            <p className="text-muted">No hay historial para este cliente.</p>
+          ) : (
+            <div className="clientes-history-list">
+              {historyItems.map((item) => {
+                const changes = diffHistory(item.before, item.after);
+                return (
+                  <article className="clientes-history-item" key={item.id}>
+                    <div className="clientes-history-meta">
+                      <strong>{item.action}</strong>
+                      <span>{item.timestamp}</span>
+                      <span>{item.user}</span>
+                      <span>{item.source}</span>
+                    </div>
+                    {changes.length === 0 ? (
+                      <p className="text-muted">Sin diferencias visibles en campos principales.</p>
+                    ) : (
+                      <div className="clientes-history-diff">
+                        {changes.slice(0, 12).map((change) => (
+                          <div className="clientes-history-change" key={`${item.id}-${change.key}`}>
+                            <span className="label">{change.label}</span>
+                            <span className="history-before">{change.before}</span>
+                            <span className="history-after">{change.after}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }

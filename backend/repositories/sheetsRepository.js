@@ -714,6 +714,43 @@ async function update(sheetName, rowIndex, data, headers) {
   }, { rowIndex });
 }
 
+async function updateBatch(sheetName, updates, headers) {
+  if (!Array.isArray(updates)) {
+    throw new BadRequestError('Las actualizaciones deben ser un array.', {
+      context: buildContext(sheetName, 'updateBatch'),
+    });
+  }
+
+  return runSheetsOperation(sheetName, 'updateBatch', async ({ sheets, spreadsheetId, mode }) => {
+    if (mode === 'memory') {
+      if (!memoryStore[sheetName]) memoryStore[sheetName] = [];
+      updates.forEach((updateItem) => {
+        const idx = updateItem.rowIndex - 2;
+        if (idx >= 0 && idx < memoryStore[sheetName].length) {
+          memoryStore[sheetName][idx] = { ...memoryStore[sheetName][idx], ...updateItem.data };
+        }
+      });
+      return { status: 'success', mode: 'memory', updated: updates.length };
+    }
+
+    await ensureSheetSchema(sheets, spreadsheetId, sheetName, headers, 'updateBatch');
+    const data = updates.map((updateItem) => ({
+      range: `${sheetName}!A${updateItem.rowIndex}:Z${updateItem.rowIndex}`,
+      values: [headers.map((header) => normalizeSheetValue(updateItem.data[header]))],
+    }));
+
+    await sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        valueInputOption: 'RAW',
+        data,
+      },
+    });
+
+    return { status: 'success', mode: 'sheets', updated: updates.length };
+  }, { updates: updates.length });
+}
+
 /**
  * Elimina una fila específica.
  * @param {string} sheetName
@@ -799,6 +836,7 @@ module.exports = {
   append,
   appendBatch,
   update,
+  updateBatch,
   deleteRow,
   delete: deleteRow,
   findByColumn,

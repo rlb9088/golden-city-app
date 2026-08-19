@@ -210,8 +210,31 @@ export interface ClienteRecord {
   ciudad_ip?: string;
   ip_city_status?: string;
   accesos: Record<string, unknown>;
+  calidad?: {
+    status?: string;
+    score?: number;
+    issues?: string[];
+    warnings?: string[];
+    checked_at?: string;
+    geoip?: {
+      checked_ips?: number;
+      matched_cities?: number;
+      top_city?: string;
+    };
+  };
   actualizado_en?: string;
   actualizado_por?: string;
+}
+
+export interface ClienteHistoryRecord {
+  id: string;
+  cliente_id: string;
+  action: string;
+  user: string;
+  timestamp: string;
+  before: Partial<ClienteRecord> | null;
+  after: Partial<ClienteRecord> | null;
+  source: string;
 }
 
 export interface ClientesFilters {
@@ -946,6 +969,17 @@ export async function updateCliente(id: string, data: Record<string, unknown>) {
   return request<{ status: string; data: ClienteRecord }>(`/api/clientes/${encodeURIComponent(id)}`, {
     method: 'PUT',
     body: JSON.stringify(data),
+  });
+}
+
+export async function getClienteHistory(id: string) {
+  return request<{ status: string; data: ClienteHistoryRecord[] }>(`/api/clientes/${encodeURIComponent(id)}/history`);
+}
+
+export async function runClientesQualityReview(limit = 300) {
+  return request<{ status: string; data: { reviewed: number; geoipChecked: number; resolvedCities: number } }>('/api/clientes/quality-review', {
+    method: 'POST',
+    body: JSON.stringify({ limit, onlyPending: true }),
   });
 }
 

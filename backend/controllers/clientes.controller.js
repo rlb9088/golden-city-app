@@ -45,4 +45,12 @@ async function exportData(req, res) {
   res.send(output.body);
 }
 
-module.exports = { getAll, getById, create, update, importBatch, getHistory, exportData };
+async function runQualityReview(req, res) {
+  const data = await clientesService.runQualityReview(req.auth.user, {
+    limit: req.body?.limit,
+    onlyPending: req.body?.onlyPending,
+  });
+  res.json({ status: 'success', data });
+}
+
+module.exports = { getAll, getById, create, update, importBatch, getHistory, exportData, runQualityReview };

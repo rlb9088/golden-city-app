@@ -25,6 +25,7 @@ const HEADERS = [
   'ciudad_ip',
   'ip_city_status',
   'accesos_json',
+  'calidad_json',
   'raw_json',
   'creado_en',
   'actualizado_en',
@@ -197,6 +198,7 @@ function normalizeClienteInput(input = {}, existing = null, user = 'system') {
     ciudad_ip: ipCity.ciudad_ip || normalizeText(existing?.ciudad_ip),
     ip_city_status: ipCity.ip_city_status || normalizeText(existing?.ip_city_status),
     accesos_json: JSON.stringify(normalizeAccesses({ ...existingReadable, ...source })),
+    calidad_json: existing?.calidad_json || JSON.stringify({ status: 'pending_review' }),
     raw_json: JSON.stringify(source.raw || source),
     creado_en: createdAt,
     actualizado_en: now,
@@ -221,6 +223,7 @@ function parseReadableCliente(row = {}) {
     telefonos: parseJson(row.telefonos_json, []),
     ips: parseJson(row.ips_json, []),
     accesos: parseJson(row.accesos_json, {}),
+    calidad: parseJson(row.calidad_json, {}),
     raw: parseJson(row.raw_json, {}),
   };
 }
@@ -420,7 +423,7 @@ function escapeCsvCell(value) {
 }
 
 function toExportRows(rows) {
-  const columns = ['id', 'estado', 'nombre', 'player_id', 'fecha_alta', 'origen', 'dni', 'fecha_nacimiento', 'edad', 'correos', 'telefonos', 'ips', 'ciudad', 'ciudad_ip', 'ip_city_status', 'accesos', 'actualizado_en'];
+  const columns = ['id', 'estado', 'nombre', 'player_id', 'fecha_alta', 'origen', 'dni', 'fecha_nacimiento', 'edad', 'correos', 'telefonos', 'ips', 'ciudad', 'ciudad_ip', 'ip_city_status', 'calidad', 'accesos', 'actualizado_en'];
   const readable = rows.map(normalizeForRead);
   return {
     columns,
@@ -455,6 +458,141 @@ function escapeHtml(value) {
     .replace(/"/g, '&quot;');
 }
 
+function isLikelyEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeText(value));
+}
+
+function getAccessValues(accesos = {}) {
+  return Object.values(accesos)
+    .filter((value) => value && typeof value === 'object')
+    .flatMap((value) => Object.values(value));
+}
+
+function buildQualityReport(readable, ipLookup = {}) {
+  const issues = [];
+  const warnings = [];
+  const correos = readable.correos || [];
+  const telefonos = readable.telefonos || [];
+  const ips = readable.ips || [];
+  const accesos = readable.accesos || {};
+
+  if (!normalizeText(readable.nombre)) issues.push('missing_nombre');
+  if (!normalizeText(readable.player_id) && !normalizeText(readable.dni)) issues.push('missing_player_id_and_dni');
+  if (correos.length === 0 && telefonos.length === 0) issues.push('missing_contact');
+  if (correos.some((email) => !isLikelyEmail(email))) warnings.push('unusual_email_format');
+  if (telefonos.some((phone) => {
+    const digits = normalizeText(phone).replace(/\D/g, '');
+    return digits.length < 7 || digits.length > 15;
+  })) warnings.push('unusual_phone_length');
+  if (ips.length > 1) warnings.push('multiple_ips');
+  if (ips.length > 0 && !normalizeText(readable.ciudad_ip)) warnings.push('missing_ip_city');
+  if (!normalizeText(readable.ciudad)) warnings.push('missing_declared_city');
+  if (getAccessValues(accesos).every((value) => !normalizeText(value))) warnings.push('missing_accesses');
+
+  const geoCities = ips
+    .map((ip) => ipLookup[ip]?.city)
+    .map(normalizeText)
+    .filter(Boolean);
+  const cityCounts = new Map();
+  geoCities.forEach((city) => cityCounts.set(city, (cityCounts.get(city) || 0) + 1));
+  const topCity = [...cityCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+
+  return {
+    status: issues.length > 0 ? 'review' : warnings.length > 0 ? 'warning' : 'ok',
+    score: Math.max(0, 100 - (issues.length * 20) - (warnings.length * 8)),
+    issues,
+    warnings,
+    checked_at: nowLima(),
+    geoip: {
+      checked_ips: Object.keys(ipLookup).length,
+      matched_cities: geoCities.length,
+      top_city: topCity,
+    },
+  };
+}
+
+async function fetchIpCity(ip) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch(`https://ipwho.is/${encodeURIComponent(ip)}?fields=success,ip,city,region,country,message`, {
+      signal: controller.signal,
+    });
+    if (!response.ok) return { ip, status: 'http_error' };
+    const data = await response.json();
+    if (!data.success) return { ip, status: 'not_found', message: data.message || '' };
+    return {
+      ip,
+      status: 'ok',
+      city: normalizeText(data.city),
+      region: normalizeText(data.region),
+      country: normalizeText(data.country),
+    };
+  } catch (error) {
+    return { ip, status: 'error', message: error?.message || 'geoip_failed' };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function runQualityReview(user = 'system', options = {}) {
+  const limit = Math.max(1, Math.min(Number(options.limit || 300), 300));
+  const rows = await repo.getAll(SHEET_NAME);
+  const candidates = rows
+    .filter((row) => {
+      if (options.onlyPending === false) return true;
+      const readable = normalizeForRead(row);
+      return normalizeText(readable.ip_city_status) === 'pending_geoip'
+        || !normalizeText(readable.calidad?.checked_at);
+    })
+    .slice(0, limit);
+
+  const uniqueIps = compactUnique(candidates.flatMap((row) => normalizeForRead(row).ips || []));
+  const ipResults = {};
+  for (const ip of uniqueIps) {
+    ipResults[ip] = await fetchIpCity(ip);
+  }
+
+  const updates = [];
+  const historyEntries = [];
+  for (const row of candidates) {
+    const before = normalizeForRead(row);
+    const ipLookup = Object.fromEntries((before.ips || []).map((ip) => [ip, ipResults[ip]]).filter(([, result]) => result));
+    const quality = buildQualityReport(before, ipLookup);
+    const geoCity = quality.geoip.top_city;
+    const next = {
+      ...row,
+      ciudad_ip: normalizeText(row.ciudad_ip) || geoCity,
+      ip_city_status: geoCity
+        ? 'geoip'
+        : (before.ips || []).length > 0 ? 'pending_geoip' : 'no_ip',
+      calidad_json: JSON.stringify(quality),
+      actualizado_en: nowLima(),
+      actualizado_por: user || 'system',
+    };
+    updates.push({ rowIndex: row._rowIndex, data: next });
+    const after = normalizeForRead(next);
+    historyEntries.push(buildHistoryEntry('quality_review', row.id, user, before, after, 'quality_review'));
+  }
+
+  if (updates.length > 0) {
+    await repo.updateBatch(SHEET_NAME, updates, HEADERS);
+  }
+  if (historyEntries.length > 0) {
+    await repo.appendBatch(HISTORY_SHEET_NAME, historyEntries);
+  }
+  await audit.log('update', 'clientes_quality', user, {
+    reviewed: updates.length,
+    geoipChecked: uniqueIps.length,
+  });
+
+  return {
+    reviewed: updates.length,
+    geoipChecked: uniqueIps.length,
+    resolvedCities: Object.values(ipResults).filter((result) => result?.city).length,
+  };
+}
+
 module.exports = {
   HEADERS,
   HISTORY_HEADERS,
@@ -468,4 +606,5 @@ module.exports = {
   importBatch,
   getHistory,
   exportData,
+  runQualityReview,
 };

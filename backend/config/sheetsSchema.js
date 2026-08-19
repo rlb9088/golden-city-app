@@ -54,6 +54,7 @@ const SHEETS_SCHEMA = [
       'ciudad_ip',
       'ip_city_status',
       'accesos_json',
+      'calidad_json',
       'raw_json',
       'creado_en',
       'actualizado_en',
