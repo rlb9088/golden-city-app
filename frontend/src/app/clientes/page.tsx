@@ -29,6 +29,9 @@ type ClienteForm = {
   telefonos: string;
   ips: string;
   ciudad: string;
+  usuario_slots: string;
+  id_slots: string;
+  clave_slots: string;
   usuario_apueston: string;
   id_apueston: string;
   clave_apueston: string;
@@ -43,6 +46,9 @@ const emptyForm: ClienteForm = {
   telefonos: '',
   ips: '',
   ciudad: '',
+  usuario_slots: '',
+  id_slots: '',
+  clave_slots: '',
   usuario_apueston: '',
   id_apueston: '',
   clave_apueston: '',
@@ -62,6 +68,9 @@ function toPayload(form: ClienteForm) {
     telefonos: splitList(form.telefonos),
     ips: splitList(form.ips),
     ciudad: form.ciudad.trim(),
+    usuario_slots: form.usuario_slots.trim(),
+    id_slots: form.id_slots.trim(),
+    clave_slots: form.clave_slots.trim(),
     usuario_apueston: form.usuario_apueston.trim(),
     id_apueston: form.id_apueston.trim(),
     clave_apueston: form.clave_apueston.trim(),
@@ -70,6 +79,7 @@ function toPayload(form: ClienteForm) {
 }
 
 function formFromCliente(cliente: ClienteRecord): ClienteForm {
+  const slots = (cliente.accesos?.slots || {}) as Record<string, string>;
   const apueston = (cliente.accesos?.apueston || {}) as Record<string, string>;
   return {
     nombre: cliente.nombre || '',
@@ -79,6 +89,9 @@ function formFromCliente(cliente: ClienteRecord): ClienteForm {
     telefonos: (cliente.telefonos || []).join('; '),
     ips: (cliente.ips || []).join('; '),
     ciudad: cliente.ciudad || '',
+    usuario_slots: slots.usuario || '',
+    id_slots: slots.id || '',
+    clave_slots: slots.clave || '',
     usuario_apueston: apueston.usuario || '',
     id_apueston: apueston.id || '',
     clave_apueston: apueston.clave || '',
@@ -402,9 +415,12 @@ export default function ClientesPage() {
             <label className="field-group field-group--wide"><span className="label">Correos</span><input className="input" value={form.correos} onChange={(event) => setForm((current) => ({ ...current, correos: event.target.value }))} /></label>
             <label className="field-group field-group--wide"><span className="label">Telefonos</span><input className="input" value={form.telefonos} onChange={(event) => setForm((current) => ({ ...current, telefonos: event.target.value }))} /></label>
             <label className="field-group field-group--wide"><span className="label">IPs</span><input className="input" value={form.ips} onChange={(event) => setForm((current) => ({ ...current, ips: event.target.value }))} /></label>
+            <label className="field-group"><span className="label">Usuario Slots</span><input className="input" value={form.usuario_slots} onChange={(event) => setForm((current) => ({ ...current, usuario_slots: event.target.value }))} /></label>
+            <label className="field-group"><span className="label">ID Slots</span><input className="input" value={form.id_slots} onChange={(event) => setForm((current) => ({ ...current, id_slots: event.target.value }))} /></label>
+            <label className="field-group"><span className="label">Clave Slots</span><input className="input" type="password" autoComplete="new-password" value={form.clave_slots} onChange={(event) => setForm((current) => ({ ...current, clave_slots: event.target.value }))} /></label>
             <label className="field-group"><span className="label">Usuario Apueston</span><input className="input" value={form.usuario_apueston} onChange={(event) => setForm((current) => ({ ...current, usuario_apueston: event.target.value }))} /></label>
             <label className="field-group"><span className="label">ID Apueston</span><input className="input" value={form.id_apueston} onChange={(event) => setForm((current) => ({ ...current, id_apueston: event.target.value }))} /></label>
-            <label className="field-group"><span className="label">Clave Apueston</span><input className="input" value={form.clave_apueston} onChange={(event) => setForm((current) => ({ ...current, clave_apueston: event.target.value }))} /></label>
+            <label className="field-group"><span className="label">Clave Apueston</span><input className="input" type="password" autoComplete="new-password" value={form.clave_apueston} onChange={(event) => setForm((current) => ({ ...current, clave_apueston: event.target.value }))} /></label>
             <label className="field-group field-group--wide"><span className="label">Link auth Apueston</span><input className="input" value={form.link_auth_apueston} onChange={(event) => setForm((current) => ({ ...current, link_auth_apueston: event.target.value }))} /></label>
             <div className="clientes-form-actions">
               <button className="btn btn-primary" type="submit" disabled={submitting}>{submitting ? 'Guardando...' : 'Guardar'}</button>
