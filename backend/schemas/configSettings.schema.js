@@ -1,7 +1,7 @@
 const { z } = require('zod');
 
 const configSettingKeySchema = z.string().trim().regex(
-  /^caja_inicio_mes(?::banco:[a-z0-9_-]+)?$/i,
+  /^(?:caja_inicio_mes(?::banco:[a-z0-9_-]+)?|clientes_slots_access_url)$/i,
   'La clave de configuracion no tiene un formato valido',
 );
 

@@ -35,15 +35,39 @@ const HEADERS = [
 
 const HISTORY_HEADERS = ['id', 'cliente_id', 'action', 'user', 'timestamp', 'before_json', 'after_json', 'source'];
 const EXCEL_HEADER_MAP = {
+  ID: 'id',
+  id: 'id',
+  Estado: 'estado',
   Nombre: 'nombre',
   player_id: 'player_id',
+  'Player ID': 'player_id',
   Fecha_alta: 'fecha_alta',
+  'Fecha de alta': 'fecha_alta',
   Origen: 'origen',
   DNI: 'dni',
   Fecha_nacimiento: 'fecha_nacimiento',
+  'Fecha de nacimiento': 'fecha_nacimiento',
   Edad: 'edad',
   IP: 'ips',
+  IPs: 'ips',
   Ciudad: 'ciudad',
+  'Ciudad declarada': 'ciudad',
+  'Ciudad IP': 'ciudad_ip',
+  'Estado ciudad IP': 'ip_city_status',
+  'Slots usuario': 'usuario_slots',
+  'Usuario slots': 'usuario_slots',
+  'Slots ID': 'id_slots',
+  'ID slots': 'id_slots',
+  'Slots clave': 'clave_slots',
+  'Clave slots': 'clave_slots',
+  'Apueston usuario': 'usuario_apueston',
+  'Usuario apueston': 'usuario_apueston',
+  'Apueston ID': 'id_apueston',
+  'ID apueston': 'id_apueston',
+  'Apueston clave': 'clave_apueston',
+  'Clave apueston': 'clave_apueston',
+  'Apueston link auth': 'link_auth_apueston',
+  'Link auth apueston': 'link_auth_apueston',
 };
 
 function repairMojibake(value) {
@@ -150,7 +174,8 @@ function collectPhones(input) {
 }
 
 function collectIps(input) {
-  const rawIps = Array.isArray(input.ips) ? input.ips : [input.ips, input.IP, input.ip];
+  const mappedIps = resolveMappedField(input, 'ips');
+  const rawIps = Array.isArray(mappedIps) ? mappedIps : [mappedIps, input.IP, input.ip];
   return compactUnique(rawIps.flatMap((value) => normalizeText(value).split(/[;,\s]+/)))
     .filter((value) => /^(?:\d{1,3}\.){3}\d{1,3}$/.test(value))
     .filter((value) => value.split('.').every((part) => Number(part) >= 0 && Number(part) <= 255));
@@ -189,23 +214,25 @@ function normalizeAccesses(input) {
   return {
     ...provided,
     slots: {
-      usuario: normalizeText(input['Usuario slots'] ?? input.usuario_slots ?? provided.slots?.usuario),
-      id: normalizeText(input['ID slots'] ?? input.id_slots ?? provided.slots?.id),
-      clave: normalizeText(input['Clave slots'] ?? input.clave_slots ?? provided.slots?.clave),
+      usuario: normalizeText(resolveMappedField(input, 'usuario_slots') ?? provided.slots?.usuario),
+      id: normalizeText(resolveMappedField(input, 'id_slots') ?? provided.slots?.id),
+      clave: normalizeText(resolveMappedField(input, 'clave_slots') ?? provided.slots?.clave),
     },
     apueston: {
-      usuario: normalizeText(input['Usuario apueston'] ?? input.usuario_apueston ?? provided.apueston?.usuario),
-      id: normalizeText(input['ID apueston'] ?? input.id_apueston ?? provided.apueston?.id),
-      clave: normalizeText(input['Clave apueston'] ?? input.clave_apueston ?? provided.apueston?.clave),
-      link_auth: normalizeText(input['Link auth apueston'] ?? input.link_auth_apueston ?? provided.apueston?.link_auth),
+      usuario: normalizeText(resolveMappedField(input, 'usuario_apueston') ?? provided.apueston?.usuario),
+      id: normalizeText(resolveMappedField(input, 'id_apueston') ?? provided.apueston?.id),
+      clave: normalizeText(resolveMappedField(input, 'clave_apueston') ?? provided.apueston?.clave),
+      link_auth: normalizeText(resolveMappedField(input, 'link_auth_apueston') ?? provided.apueston?.link_auth),
     },
   };
 }
 
 function resolveMappedField(input, field) {
   if (Object.prototype.hasOwnProperty.call(input, field)) return input[field];
-  const excelHeader = Object.entries(EXCEL_HEADER_MAP).find(([, mapped]) => mapped === field)?.[0];
-  return excelHeader ? input[excelHeader] : undefined;
+  const aliases = Object.entries(EXCEL_HEADER_MAP)
+    .filter(([, mapped]) => mapped === field)
+    .map(([header]) => normalizeHeader(header));
+  return Object.entries(input).find(([header]) => aliases.includes(normalizeHeader(header)))?.[1];
 }
 
 function inferIpCity(input, ips) {
@@ -247,7 +274,10 @@ function normalizeClienteInput(input = {}, existing = null, user = 'system') {
     ip_city_status: ipCity.ip_city_status || normalizeText(existing?.ip_city_status),
     accesos_json: JSON.stringify(normalizeAccesses({ ...existingReadable, ...source })),
     calidad_json: existing?.calidad_json || JSON.stringify({ status: 'pending_review' }),
-    raw_json: JSON.stringify(source.raw || source),
+    raw_json: JSON.stringify({
+      ...(existingReadable.raw && typeof existingReadable.raw === 'object' ? existingReadable.raw : {}),
+      ...(source.raw && typeof source.raw === 'object' ? source.raw : source),
+    }),
     creado_en: createdAt,
     actualizado_en: now,
     actualizado_por: normalizeText(user) || 'system',
@@ -399,8 +429,20 @@ async function update(id, patch, user = 'system') {
   return after;
 }
 
+function omitEmptyImportValues(item = {}) {
+  const ignoredHeaders = new Set(['edad', 'calidad', 'ultimaactualizacion']);
+  return Object.entries(item).reduce((result, [key, value]) => {
+    if (ignoredHeaders.has(normalizeHeader(key))) return result;
+    const isEmptyArray = Array.isArray(value) && value.length === 0;
+    if (value === undefined || value === null || isEmptyArray || normalizeText(value) === '') return result;
+    result[key] = value;
+    return result;
+  }, {});
+}
+
 async function importBatch(items, user = 'system', source = 'bulk_import') {
   const rows = await repo.getAll(SHEET_NAME);
+  const existingById = new Map(rows.filter((row) => normalizeText(row.id)).map((row) => [normalizeLookup(row.id), row]));
   const existingByPlayerId = new Map(rows.filter((row) => normalizeText(row.player_id)).map((row) => [normalizeLookup(row.player_id), row]));
   const existingByDni = new Map(rows.filter((row) => normalizeText(row.dni)).map((row) => [normalizeLookup(row.dni), row]));
   const created = [];
@@ -409,13 +451,25 @@ async function importBatch(items, user = 'system', source = 'bulk_import') {
   const historyEntries = [];
 
   for (const item of items) {
-    const probe = normalizeClienteInput(item, null, user);
-    const existing = (probe.player_id && existingByPlayerId.get(normalizeLookup(probe.player_id)))
-      || (probe.dni && existingByDni.get(normalizeLookup(probe.dni)))
-      || null;
+    const sourceItem = omitEmptyImportValues(item);
+    const importedId = normalizeText(resolveMappedField(sourceItem, 'id'));
+    let existing = importedId ? existingById.get(normalizeLookup(importedId)) || null : null;
+
+    if (importedId && !existing) {
+      throw new BadRequestError(`No se encontro el cliente con ID ${importedId}. Deja el ID vacio para crear uno nuevo.`, {
+        context: { entity: 'clientes', importedId },
+      });
+    }
+
+    const probe = existing ? null : normalizeClienteInput(sourceItem, null, user);
+    if (!existing) {
+      existing = (probe.player_id && existingByPlayerId.get(normalizeLookup(probe.player_id)))
+        || (probe.dni && existingByDni.get(normalizeLookup(probe.dni)))
+        || null;
+    }
 
     if (existing) {
-      const nextRecord = normalizeClienteInput(item, existing, user);
+      const nextRecord = normalizeClienteInput(sourceItem, existing, user);
       if (!existing._rowIndex) {
         const createdIndex = createdRecords.findIndex((record) => record.id === existing.id);
         if (createdIndex >= 0) {
@@ -428,6 +482,7 @@ async function importBatch(items, user = 'system', source = 'bulk_import') {
         }
         existingByPlayerId.set(normalizeLookup(nextRecord.player_id), nextRecord);
         existingByDni.set(normalizeLookup(nextRecord.dni), nextRecord);
+        existingById.set(normalizeLookup(nextRecord.id), nextRecord);
         continue;
       }
       await repo.update(SHEET_NAME, existing._rowIndex, nextRecord, HEADERS);
@@ -437,6 +492,7 @@ async function importBatch(items, user = 'system', source = 'bulk_import') {
       updated.push(after);
       existingByPlayerId.set(normalizeLookup(nextRecord.player_id), nextRecord);
       existingByDni.set(normalizeLookup(nextRecord.dni), nextRecord);
+      existingById.set(normalizeLookup(nextRecord.id), nextRecord);
       continue;
     }
 
@@ -446,6 +502,7 @@ async function importBatch(items, user = 'system', source = 'bulk_import') {
     created.push(readable);
     existingByPlayerId.set(normalizeLookup(probe.player_id), probe);
     existingByDni.set(normalizeLookup(probe.dni), probe);
+    existingById.set(normalizeLookup(probe.id), probe);
   }
 
   if (createdRecords.length > 0) {

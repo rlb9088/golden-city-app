@@ -225,3 +225,45 @@ test('importBatch actualiza existentes por player_id y crea nuevos', async () =>
   assert.equal(appended.some((call) => call.sheetName === 'clientes'), true);
   assert.equal(appended.filter((call) => call.sheetName === 'clientes_historial').length, 2);
 });
+
+test('importBatch acepta encabezados de la plantilla, usa ID y conserva celdas vacias', async () => {
+  const rows = [{
+    _rowIndex: 2,
+    id: 'CLI-1',
+    estado: 'activo',
+    nombre: 'Ana',
+    player_id: 'P1',
+    dni: '123',
+    fecha_nacimiento: '',
+    correos_json: '["ana@example.com"]',
+    telefonos_json: '["+51959199901"]',
+    ips_json: '[]',
+    accesos_json: '{}',
+    calidad_json: '{}',
+    raw_json: '{}',
+    creado_en: '2026-01-01T00:00:00',
+    actualizado_en: '2026-01-01T00:00:00',
+  }];
+  const updated = [];
+  const service = loadClientesService({
+    rows,
+    update: async (sheetName, rowIndex, data) => updated.push({ sheetName, rowIndex, data }),
+  });
+
+  const result = await service.importBatch([{
+    ID: 'CLI-1',
+    Nombre: '',
+    'Fecha de nacimiento': '20/08/2000',
+    'Slots usuario': 'ana_slots',
+    'Slots ID': 'S-100',
+    'Slots clave': 'clave-segura',
+  }], 'admin', 'clientes_template');
+
+  assert.equal(result.updated.length, 1);
+  assert.equal(updated[0].data.nombre, 'Ana');
+  assert.equal(updated[0].data.fecha_nacimiento, '2000-08-20');
+  assert.deepStrictEqual(JSON.parse(updated[0].data.telefonos_json), ['+51959199901']);
+  assert.deepStrictEqual(JSON.parse(updated[0].data.accesos_json).slots, {
+    usuario: 'ana_slots', id: 'S-100', clave: 'clave-segura',
+  });
+});

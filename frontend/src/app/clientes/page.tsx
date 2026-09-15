@@ -10,6 +10,7 @@ import {
   downloadClientesExport,
   getClienteHistory,
   getClientes,
+  getSetting,
   importClientes,
   runClientesQualityReview,
   updateCliente,
@@ -20,11 +21,20 @@ import {
 import './clientes.css';
 
 const PAGE_SIZE = 50;
+const SLOTS_ACCESS_URL_KEY = 'clientes_slots_access_url';
+const DEFAULT_SLOTS_ACCESS_URL = 'https://bet30.bid';
+const CLIENTE_TEMPLATE_HEADERS = [
+  'ID', 'Estado', 'Nombre', 'Player ID', 'Fecha de alta', 'Origen', 'DNI', 'Fecha de nacimiento', 'Edad',
+  'Correo 1', 'Correo 2', 'Correo 3', 'Telefono 1', 'Telefono 2', 'Telefono 3', 'Telefono 4', 'IPs',
+  'Ciudad declarada', 'Ciudad IP', 'Estado ciudad IP', 'Slots usuario', 'Slots ID', 'Slots clave',
+  'Apueston usuario', 'Apueston ID', 'Apueston clave', 'Apueston link auth', 'Calidad', 'Ultima actualizacion',
+];
 
 type ClienteForm = {
   nombre: string;
   player_id: string;
   dni: string;
+  fecha_nacimiento: string;
   correos: string;
   telefonos: string;
   ips: string;
@@ -42,6 +52,7 @@ const emptyForm: ClienteForm = {
   nombre: '',
   player_id: '',
   dni: '',
+  fecha_nacimiento: '',
   correos: '',
   telefonos: '',
   ips: '',
@@ -64,6 +75,7 @@ function toPayload(form: ClienteForm) {
     nombre: form.nombre.trim(),
     player_id: form.player_id.trim(),
     dni: form.dni.trim(),
+    fecha_nacimiento: form.fecha_nacimiento,
     correos: splitList(form.correos),
     telefonos: splitList(form.telefonos),
     ips: splitList(form.ips),
@@ -85,6 +97,7 @@ function formFromCliente(cliente: ClienteRecord): ClienteForm {
     nombre: cliente.nombre || '',
     player_id: cliente.player_id || '',
     dni: cliente.dni || '',
+    fecha_nacimiento: cliente.fecha_nacimiento || '',
     correos: (cliente.correos || []).join('; '),
     telefonos: (cliente.telefonos || []).join('; '),
     ips: (cliente.ips || []).join('; '),
@@ -128,6 +141,48 @@ function parseBulkText(value: string) {
       return acc;
     }, {});
   });
+}
+
+async function parseBulkFile(file: File) {
+  if (file.name.toLowerCase().endsWith('.csv')) return parseBulkText(await file.text());
+
+  const XLSX = await import('xlsx');
+  const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: false });
+  const firstSheet = workbook.SheetNames[0];
+  if (!firstSheet) return [];
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[firstSheet], {
+    defval: '',
+    raw: false,
+    dateNF: 'yyyy-mm-dd',
+  });
+}
+
+async function downloadClienteTemplate() {
+  const XLSX = await import('xlsx');
+  const workbook = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet([CLIENTE_TEMPLATE_HEADERS, CLIENTE_TEMPLATE_HEADERS.map(() => '')]);
+  sheet['!cols'] = CLIENTE_TEMPLATE_HEADERS.map((header) => ({ wch: Math.max(14, Math.min(header.length + 3, 30)) }));
+  XLSX.utils.book_append_sheet(workbook, sheet, 'Clientes');
+  XLSX.writeFile(workbook, 'plantilla-clientes.xlsx');
+}
+
+function requiredAccessValue(value: string | undefined, label: string) {
+  return value?.trim() || `No registrado (${label})`;
+}
+
+function buildSlotsAccessMessage(cliente: ClienteRecord, slotsUrl: string) {
+  const slots = (cliente.accesos?.slots || {}) as Record<string, string>;
+  const link = slotsUrl.trim() || DEFAULT_SLOTS_ACCESS_URL;
+  return `Datos de acceso:\n\nUsuario: ${requiredAccessValue(slots.usuario, 'obligatorio')}\nID: ${slots.id?.trim() || 'No registrado'}\nContraseña: ${requiredAccessValue(slots.clave, 'obligatoria')}\n\nEnlace: [${link}](${link})`;
+}
+
+function buildSportsAccessMessage(cliente: ClienteRecord) {
+  const apueston = (cliente.accesos?.apueston || {}) as Record<string, string>;
+  return `Datos de acceso:\n\nID: ${requiredAccessValue(apueston.id, 'obligatorio')}\nInicio de Sesión: ${requiredAccessValue(apueston.usuario, 'obligatorio')}\nContraseña: ${requiredAccessValue(apueston.clave, 'obligatoria')}\nAuth link: ${apueston.link_auth?.trim() || 'No registrado'}`;
+}
+
+async function copyToClipboard(text: string) {
+  await navigator.clipboard.writeText(text);
 }
 
 const fieldLabels: Record<string, string> = {
@@ -184,12 +239,15 @@ export default function ClientesPage() {
   const [form, setForm] = useState<ClienteForm>(emptyForm);
   const [editing, setEditing] = useState<ClienteRecord | null>(null);
   const [bulkText, setBulkText] = useState('');
+  const [bulkItems, setBulkItems] = useState<Record<string, unknown>[]>([]);
+  const [bulkFileName, setBulkFileName] = useState('');
   const [showEditor, setShowEditor] = useState(false);
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [qualityRunning, setQualityRunning] = useState(false);
   const [historyCliente, setHistoryCliente] = useState<ClienteRecord | null>(null);
   const [historyItems, setHistoryItems] = useState<ClienteHistoryRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [slotsAccessUrl, setSlotsAccessUrl] = useState(DEFAULT_SLOTS_ACCESS_URL);
 
   const currentPage = Math.floor(pagination.offset / pagination.limit);
   const hasFilters = Boolean(filters.q || filters.ciudad || filters.estado);
@@ -220,6 +278,12 @@ export default function ClientesPage() {
   useEffect(() => {
     void loadPage(0);
   }, [loadPage]);
+
+  useEffect(() => {
+    void getSetting(SLOTS_ACCESS_URL_KEY)
+      .then((response) => setSlotsAccessUrl(String(response.data.value || DEFAULT_SLOTS_ACCESS_URL)))
+      .catch(() => setSlotsAccessUrl(DEFAULT_SLOTS_ACCESS_URL));
+  }, []);
 
   const visibleCities = useMemo(() => {
     const cities = new Set(clientes.map((cliente) => cliente.ciudad).filter(Boolean));
@@ -256,20 +320,46 @@ export default function ClientesPage() {
 
   const handleBulkImport = async () => {
     try {
-      const items = parseBulkText(bulkText);
+      const items = bulkItems.length > 0 ? bulkItems : parseBulkText(bulkText);
       if (items.length === 0) {
-        setAlert({ type: 'warning', message: 'Pega filas o JSON para importar.' });
+        setAlert({ type: 'warning', message: 'Selecciona una plantilla o pega filas para importar.' });
         return;
       }
       setSubmitting(true);
       const response = await importClientes(items, 'frontend_bulk_import');
       setBulkText('');
+      setBulkItems([]);
+      setBulkFileName('');
       setAlert({ type: 'success', message: `Importados ${response.data.count} clientes: ${response.data.created.length} nuevos y ${response.data.updated.length} actualizados.` });
       await loadPage(0);
     } catch (err) {
       setAlert({ type: 'error', message: err instanceof Error ? err.message : 'No se pudo importar la carga masiva' });
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleBulkFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const items = await parseBulkFile(file);
+      if (items.length === 0) {
+        setAlert({ type: 'warning', message: 'El archivo no contiene filas de clientes.' });
+        setBulkItems([]);
+        setBulkFileName('');
+        return;
+      }
+      setBulkItems(items);
+      setBulkFileName(file.name);
+      setBulkText('');
+      setAlert({ type: 'success', message: `${items.length} fila(s) listas para validar e importar.` });
+    } catch (err) {
+      setBulkItems([]);
+      setBulkFileName('');
+      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'No se pudo leer el archivo.' });
+    } finally {
+      event.target.value = '';
     }
   };
 
@@ -320,6 +410,15 @@ export default function ClientesPage() {
     setForm(formFromCliente(cliente));
     setShowEditor(true);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const copyAccess = async (message: string, label: string) => {
+    try {
+      await copyToClipboard(message);
+      setAlert({ type: 'success', message: `Accesos de ${label} copiados al portapapeles.` });
+    } catch {
+      setAlert({ type: 'error', message: 'No se pudo copiar los accesos. Revisa los permisos del navegador.' });
+    }
   };
 
   const resetFilters = () => {
@@ -411,6 +510,7 @@ export default function ClientesPage() {
             <label className="field-group"><span className="label">Nombre</span><input className="input" value={form.nombre} onChange={(event) => setForm((current) => ({ ...current, nombre: event.target.value }))} /></label>
             <label className="field-group"><span className="label">Player ID</span><input className="input" value={form.player_id} onChange={(event) => setForm((current) => ({ ...current, player_id: event.target.value }))} /></label>
             <label className="field-group"><span className="label">DNI</span><input className="input" value={form.dni} onChange={(event) => setForm((current) => ({ ...current, dni: event.target.value }))} /></label>
+            <label className="field-group"><span className="label">Fecha de nacimiento</span><input className="input" type="date" value={form.fecha_nacimiento} onChange={(event) => setForm((current) => ({ ...current, fecha_nacimiento: event.target.value }))} /></label>
             <label className="field-group"><span className="label">Ciudad</span><input className="input" value={form.ciudad} onChange={(event) => setForm((current) => ({ ...current, ciudad: event.target.value }))} /></label>
             <label className="field-group field-group--wide"><span className="label">Correos</span><input className="input" value={form.correos} onChange={(event) => setForm((current) => ({ ...current, correos: event.target.value }))} /></label>
             <label className="field-group field-group--wide"><span className="label">Telefonos</span><input className="input" value={form.telefonos} onChange={(event) => setForm((current) => ({ ...current, telefonos: event.target.value }))} /></label>
@@ -434,15 +534,23 @@ export default function ClientesPage() {
           <div className="section-heading">
             <div>
               <h2 className="balance-section-title">Carga masiva</h2>
-              <p className="page-subtitle">Acepta JSON o filas con encabezados separados por punto y coma.</p>
+              <p className="page-subtitle">Descarga la plantilla, completa una o varias filas y subela para validar y actualizar la base oficial.</p>
             </div>
-            <button className="btn btn-primary" type="button" onClick={() => void handleBulkImport()} disabled={submitting || !bulkText.trim()}>Importar</button>
+            <div className="clientes-import-actions">
+              <button className="btn btn-secondary" type="button" onClick={() => void downloadClienteTemplate()}>Descargar plantilla</button>
+              <button className="btn btn-primary" type="button" onClick={() => void handleBulkImport()} disabled={submitting || (!bulkText.trim() && bulkItems.length === 0)}>Importar</button>
+            </div>
           </div>
+          <label className="field-group clientes-file-input">
+            <span className="label">Plantilla de clientes (.xlsx o .csv)</span>
+            <input className="input" type="file" accept=".xlsx,.xls,.csv" onChange={(event) => void handleBulkFileChange(event)} />
+            {bulkFileName && <span className="text-muted">{bulkFileName}: {bulkItems.length} fila(s) listas para importar.</span>}
+          </label>
           <textarea
             className="input clientes-import-textarea"
             value={bulkText}
-            onChange={(event) => setBulkText(event.target.value)}
-            placeholder="Nombre;player_id;DNI;Telefono_1;Correo_1;IP;Ciudad"
+            onChange={(event) => { setBulkText(event.target.value); setBulkItems([]); setBulkFileName(''); }}
+            placeholder="Tambien puedes pegar filas separadas por punto y coma o JSON."
           />
         </section>
       )}
@@ -456,7 +564,7 @@ export default function ClientesPage() {
         </div>
 
         {loading ? (
-          <TableSkeleton columns={8} rows={5} />
+          <TableSkeleton columns={9} rows={5} />
         ) : clientes.length === 0 ? (
           <div className="empty-state card"><p>No hay clientes que coincidan con la busqueda.</p></div>
         ) : (
@@ -472,7 +580,7 @@ export default function ClientesPage() {
                   <th>IP / Ciudad</th>
                   <th>Calidad</th>
                   <th>Accesos</th>
-                  {isAdmin && <th style={{ textAlign: 'right' }}>Acciones</th>}
+                  <th style={{ textAlign: 'right' }}>Acciones</th>
                 </tr>
               </thead>
               <tbody>
@@ -493,12 +601,16 @@ export default function ClientesPage() {
                         <div className="text-muted">{cliente.calidad?.score ?? '-'}/100</div>
                       </td>
                       <td>{apueston.usuario ? <span className="badge badge-blue">{apueston.usuario}</span> : <span className="text-muted">-</span>}</td>
-                      {isAdmin && (
-                        <td className="text-right clientes-row-actions">
+                      <td className="text-right clientes-row-actions">
+                        <button className="btn btn-secondary btn-sm" type="button" onClick={() => void copyAccess(buildSlotsAccessMessage(cliente, slotsAccessUrl), 'Slots')}>Accesos Slots</button>
+                        <button className="btn btn-secondary btn-sm" type="button" onClick={() => void copyAccess(buildSportsAccessMessage(cliente), 'Apuestas Deportivas')}>Accesos Apuestas Deportivas</button>
+                        {isAdmin && (
+                          <>
                           <button className="btn btn-secondary btn-sm" type="button" onClick={() => void openHistory(cliente)}>Historial</button>
                           <button className="btn btn-secondary btn-sm" type="button" onClick={() => openEdit(cliente)}>Editar</button>
-                        </td>
-                      )}
+                          </>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}

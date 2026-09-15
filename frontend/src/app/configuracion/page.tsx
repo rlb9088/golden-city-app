@@ -24,6 +24,7 @@ import { formatCurrency, formatDate, getTodayLima } from '@/lib/format';
 import './configuracion.css';
 
 const CAJA_INICIO_MES_KEY = 'caja_inicio_mes';
+const SLOTS_ACCESS_URL_KEY = 'clientes_slots_access_url';
 
 const TABS = [
   { id: 'agentes', label: '👤 Agentes' },
@@ -130,6 +131,9 @@ export default function ConfiguracionPage() {
   const [cajaInicioMesFecha, setCajaInicioMesFecha] = useState('');
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsSubmitting, setSettingsSubmitting] = useState(false);
+  const [slotsAccessUrl, setSlotsAccessUrl] = useState('https://bet30.bid');
+  const [slotsAccessUrlLoading, setSlotsAccessUrlLoading] = useState(true);
+  const [slotsAccessUrlSubmitting, setSlotsAccessUrlSubmitting] = useState(false);
   const [agentBanks, setAgentBanks] = useState<AgentBankSetting[]>([]);
   const [agentBanksLoading, setAgentBanksLoading] = useState(true);
   const [agentBanksSubmittingId, setAgentBanksSubmittingId] = useState<string | null>(null);
@@ -199,6 +203,19 @@ export default function ConfiguracionPage() {
       setCajaInicioMesFecha(getTodayLima());
     } finally {
       setSettingsLoading(false);
+    }
+  }, []);
+
+  const loadSlotsAccessUrl = useCallback(async () => {
+    setSlotsAccessUrlLoading(true);
+    try {
+      const setting = await getSetting(SLOTS_ACCESS_URL_KEY);
+      setSlotsAccessUrl(String(setting.data.value || 'https://bet30.bid'));
+    } catch (err) {
+      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al cargar el enlace de Slots' });
+      setSlotsAccessUrl('https://bet30.bid');
+    } finally {
+      setSlotsAccessUrlLoading(false);
     }
   }, []);
 
@@ -274,6 +291,11 @@ export default function ConfiguracionPage() {
       alive = false;
     };
   }, [isAdmin, loadCajaInicioMes]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    void loadSlotsAccessUrl();
+  }, [isAdmin, loadSlotsAccessUrl]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -569,6 +591,29 @@ export default function ConfiguracionPage() {
     }
   };
 
+  const handleSlotsAccessUrlSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const value = slotsAccessUrl.trim();
+    try {
+      const parsed = new URL(value);
+      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('protocol');
+    } catch {
+      setAlert({ type: 'error', message: 'Ingresa un enlace de Slots valido que comience con http:// o https://.' });
+      return;
+    }
+
+    try {
+      setSlotsAccessUrlSubmitting(true);
+      const response = await updateSetting(SLOTS_ACCESS_URL_KEY, value, getTodayLima());
+      setSlotsAccessUrl(String(response.data.value));
+      setAlert({ type: 'success', message: 'Enlace de Slots actualizado correctamente.' });
+    } catch (err) {
+      setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al actualizar el enlace de Slots' });
+    } finally {
+      setSlotsAccessUrlSubmitting(false);
+    }
+  };
+
   const handleAgentBankChange = useCallback((bankId: string, field: 'value' | 'fecha_efectiva', nextValue: string) => {
     setAgentBanks((current) => current.map((bank) => (
       bank.id === bankId
@@ -691,6 +736,37 @@ export default function ConfiguracionPage() {
         </form>
 
         {settingsLoading && <p className="text-muted settings-loading">Cargando ajuste actual...</p>}
+      </section>
+
+      <section className="config-section card config-section--settings">
+        <div className="config-section-header">
+          <div>
+            <h2 className="config-section-title">Accesos de clientes</h2>
+            <p className="page-subtitle" style={{ margin: '0.25rem 0 0' }}>
+              Este enlace se incluye al copiar los accesos de Slots desde Clientes.
+            </p>
+          </div>
+        </div>
+
+        <form className="settings-form settings-form--url" onSubmit={handleSlotsAccessUrlSubmit}>
+          <label className="field-group">
+            <span className="label">Enlace de la plataforma Slots</span>
+            <input
+              className="input"
+              type="url"
+              value={slotsAccessUrl}
+              onChange={(event) => setSlotsAccessUrl(event.target.value)}
+              placeholder="https://bet30.bid"
+              required
+              disabled={slotsAccessUrlLoading}
+            />
+          </label>
+          <div className="settings-actions">
+            <button className="btn btn-primary" type="submit" disabled={slotsAccessUrlLoading || slotsAccessUrlSubmitting || !slotsAccessUrl.trim()}>
+              {slotsAccessUrlSubmitting ? 'Guardando...' : 'Guardar enlace'}
+            </button>
+          </div>
+        </form>
       </section>
 
       <section className="config-section card config-section--agent-banks">

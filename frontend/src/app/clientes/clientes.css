@@ -30,6 +30,20 @@
   flex-wrap: wrap;
 }
 
+.clientes-import-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.clientes-file-input {
+  display: grid;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-md);
+}
+
 .clientes-form,
 .clientes-filter-grid {
   display: grid;
@@ -58,6 +72,7 @@
   display: flex;
   justify-content: flex-end;
   gap: var(--space-xs);
+  flex-wrap: wrap;
 }
 
 .quality-ok {
@@ -147,6 +162,7 @@
 @media (max-width: 640px) {
   .clientes-actions,
   .clientes-admin-buttons,
+  .clientes-import-actions,
   .clientes-filter-actions,
   .clientes-form-actions {
     justify-content: stretch;
@@ -154,6 +170,7 @@
 
   .clientes-actions .btn,
   .clientes-admin-buttons .btn,
+  .clientes-import-actions .btn,
   .clientes-filter-actions .btn,
   .clientes-form-actions .btn {
     flex: 1;

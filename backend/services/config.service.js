@@ -25,7 +25,8 @@ const TABLES = {
 const SETTINGS_SHEET = 'config_settings';
 const SETTINGS_HEADERS = ['key', 'value', 'fecha_efectiva', 'actualizado_por', 'actualizado_en'];
 const SETTINGS_SEED_KEY = 'caja_inicio_mes';
-const SETTINGS_KEY_REGEX = /^caja_inicio_mes(?::banco:[a-z0-9_-]+)?$/i;
+const SLOTS_ACCESS_URL_KEY = 'clientes_slots_access_url';
+const SETTINGS_KEY_REGEX = /^(?:caja_inicio_mes(?::banco:[a-z0-9_-]+)?|clientes_slots_access_url)$/i;
 const BANK_CLASSIFICATION_TTL_MS = 30_000;
 
 // Default seed data (used when tables are empty)
@@ -122,6 +123,16 @@ function buildSettingsSeedRecord() {
     key: SETTINGS_SEED_KEY,
     value: '0',
     fecha_efectiva: getFirstDayOfCurrentMonthLima(),
+    actualizado_por: 'system',
+    actualizado_en: nowLima(),
+  };
+}
+
+function buildSlotsAccessUrlSeedRecord() {
+  return {
+    key: SLOTS_ACCESS_URL_KEY,
+    value: 'https://bet30.bid',
+    fecha_efectiva: todayLima(),
     actualizado_por: 'system',
     actualizado_en: nowLima(),
   };
@@ -626,6 +637,10 @@ async function getSetting(key) {
       return formatSettingForRead(buildSettingsSeedRecord());
     }
 
+    if (normalizedKey === SLOTS_ACCESS_URL_KEY) {
+      return formatSettingForRead(buildSlotsAccessUrlSeedRecord());
+    }
+
     throw error;
   }
 
@@ -637,6 +652,10 @@ async function getSetting(key) {
 
   if (normalizedKey === SETTINGS_SEED_KEY) {
     return formatSettingForRead(buildSettingsSeedRecord());
+  }
+
+  if (normalizedKey === SLOTS_ACCESS_URL_KEY) {
+    return formatSettingForRead(buildSlotsAccessUrlSeedRecord());
   }
 
   throw new NotFoundError(`No se encontro la clave ${key} en la tabla config_settings.`, {
@@ -661,6 +680,17 @@ async function upsertSetting(key, item, user = 'system') {
         key: normalizedKey,
       },
     });
+  }
+
+  if (normalizedKey === SLOTS_ACCESS_URL_KEY) {
+    try {
+      const parsed = new URL(value);
+      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('protocol');
+    } catch {
+      throw new BadRequestError('El enlace de Slots debe ser una URL http o https valida.', {
+        context: { tableName: SETTINGS_SHEET, key: normalizedKey },
+      });
+    }
   }
 
   if (!fechaEfectiva) {

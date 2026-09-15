@@ -67,6 +67,10 @@
   align-items: end;
 }
 
+.settings-form--url {
+  grid-template-columns: minmax(280px, 1fr) auto;
+}
+
 .settings-summary {
   display: grid;
   gap: 0.35rem;
