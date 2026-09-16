@@ -170,9 +170,20 @@ function requiredAccessValue(value: string | undefined, label: string) {
   return value?.trim() || `No registrado (${label})`;
 }
 
+function normalizeAccessUrl(value: string) {
+  const text = value.trim();
+  const markdownUrl = text.match(/^\[[^\]]*\]\((https?:\/\/[^\s)]+)\)$/i)?.[1];
+  const plainUrl = text.match(/https?:\/\/[^\s)\]]+/i)?.[0];
+  return markdownUrl || plainUrl || DEFAULT_SLOTS_ACCESS_URL;
+}
+
+function hasAccessData(access: Record<string, string>) {
+  return Object.values(access).some((value) => Boolean(value?.trim()));
+}
+
 function buildSlotsAccessMessage(cliente: ClienteRecord, slotsUrl: string) {
   const slots = (cliente.accesos?.slots || {}) as Record<string, string>;
-  const link = slotsUrl.trim() || DEFAULT_SLOTS_ACCESS_URL;
+  const link = normalizeAccessUrl(slotsUrl);
   return `Datos de acceso:\n\nUsuario: ${requiredAccessValue(slots.usuario, 'obligatorio')}\nID: ${slots.id?.trim() || 'No registrado'}\nContraseña: ${requiredAccessValue(slots.clave, 'obligatoria')}\n\nEnlace: [${link}](${link})`;
 }
 
@@ -248,6 +259,7 @@ export default function ClientesPage() {
   const [historyItems, setHistoryItems] = useState<ClienteHistoryRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [slotsAccessUrl, setSlotsAccessUrl] = useState(DEFAULT_SLOTS_ACCESS_URL);
+  const [copyFeedback, setCopyFeedback] = useState<{ type: 'success' | 'warning' | 'error'; message: string } | null>(null);
 
   const currentPage = Math.floor(pagination.offset / pagination.limit);
   const hasFilters = Boolean(filters.q || filters.ciudad || filters.estado);
@@ -284,6 +296,12 @@ export default function ClientesPage() {
       .then((response) => setSlotsAccessUrl(String(response.data.value || DEFAULT_SLOTS_ACCESS_URL)))
       .catch(() => setSlotsAccessUrl(DEFAULT_SLOTS_ACCESS_URL));
   }, []);
+
+  useEffect(() => {
+    if (!copyFeedback) return undefined;
+    const timer = window.setTimeout(() => setCopyFeedback(null), 3500);
+    return () => window.clearTimeout(timer);
+  }, [copyFeedback]);
 
   const visibleCities = useMemo(() => {
     const cities = new Set(clientes.map((cliente) => cliente.ciudad).filter(Boolean));
@@ -415,10 +433,28 @@ export default function ClientesPage() {
   const copyAccess = async (message: string, label: string) => {
     try {
       await copyToClipboard(message);
-      setAlert({ type: 'success', message: `Accesos de ${label} copiados al portapapeles.` });
+      setCopyFeedback({ type: 'success', message: `Accesos de ${label} copiados al portapapeles.` });
     } catch {
-      setAlert({ type: 'error', message: 'No se pudo copiar los accesos. Revisa los permisos del navegador.' });
+      setCopyFeedback({ type: 'error', message: 'No se pudo copiar los accesos. Revisa los permisos del navegador.' });
     }
+  };
+
+  const handleSlotsAccess = (cliente: ClienteRecord) => {
+    const slots = (cliente.accesos?.slots || {}) as Record<string, string>;
+    if (!hasAccessData(slots)) {
+      setCopyFeedback({ type: 'warning', message: 'El usuario no tiene accesos de Slots registrados.' });
+      return;
+    }
+    void copyAccess(buildSlotsAccessMessage(cliente, slotsAccessUrl), 'Slots');
+  };
+
+  const handleSportsAccess = (cliente: ClienteRecord) => {
+    const apueston = (cliente.accesos?.apueston || {}) as Record<string, string>;
+    if (!hasAccessData(apueston)) {
+      setCopyFeedback({ type: 'warning', message: 'El usuario no tiene accesos de Apuestas Deportivas registrados.' });
+      return;
+    }
+    void copyAccess(buildSportsAccessMessage(cliente), 'Apuestas Deportivas');
   };
 
   const resetFilters = () => {
@@ -445,6 +481,11 @@ export default function ClientesPage() {
       </div>
 
       {alert && <AlertBanner type={alert.type} message={alert.message} onDismiss={() => setAlert(null)} />}
+      {copyFeedback && (
+        <div className={`clientes-copy-feedback clientes-copy-feedback--${copyFeedback.type}`} role="status" aria-live="polite">
+          {copyFeedback.message}
+        </div>
+      )}
 
       <section className="card clientes-search">
         <form className="clientes-filter-grid" onSubmit={handleFilterSubmit}>
@@ -602,8 +643,8 @@ export default function ClientesPage() {
                       </td>
                       <td>{apueston.usuario ? <span className="badge badge-blue">{apueston.usuario}</span> : <span className="text-muted">-</span>}</td>
                       <td className="text-right clientes-row-actions">
-                        <button className="btn btn-secondary btn-sm" type="button" onClick={() => void copyAccess(buildSlotsAccessMessage(cliente, slotsAccessUrl), 'Slots')}>Accesos Slots</button>
-                        <button className="btn btn-secondary btn-sm" type="button" onClick={() => void copyAccess(buildSportsAccessMessage(cliente), 'Apuestas Deportivas')}>Accesos Apuestas Deportivas</button>
+                        <button className="btn btn-secondary btn-sm" type="button" onClick={() => handleSlotsAccess(cliente)}>Accesos Slots</button>
+                        <button className="btn btn-secondary btn-sm" type="button" onClick={() => handleSportsAccess(cliente)}>Accesos Apuestas Deportivas</button>
                         {isAdmin && (
                           <>
                           <button className="btn btn-secondary btn-sm" type="button" onClick={() => void openHistory(cliente)}>Historial</button>
