@@ -184,7 +184,7 @@ function hasAccessData(access: Record<string, string>) {
 function buildSlotsAccessMessage(cliente: ClienteRecord, slotsUrl: string) {
   const slots = (cliente.accesos?.slots || {}) as Record<string, string>;
   const link = normalizeAccessUrl(slotsUrl);
-  return `Datos de acceso:\n\nUsuario: ${requiredAccessValue(slots.usuario, 'obligatorio')}\nID: ${slots.id?.trim() || 'No registrado'}\nContraseña: ${requiredAccessValue(slots.clave, 'obligatoria')}\n\nEnlace: [${link}](${link})`;
+  return `Datos de acceso:\n\nUsuario: ${requiredAccessValue(slots.usuario, 'obligatorio')}\nID: ${slots.id?.trim() || 'No registrado'}\nContraseña: ${requiredAccessValue(slots.clave, 'obligatoria')}\n\nEnlace: ${link}`;
 }
 
 function buildSportsAccessMessage(cliente: ClienteRecord) {
