@@ -106,6 +106,59 @@ test('analyzeReceipt falls back to Tesseract when Vision request fails', async (
   }
 });
 
+test('analyzeReceipt reads Vision textAnnotations when fullTextAnnotation is empty', async () => {
+  class TextAnnotationsVisionClient {
+    async documentTextDetection() {
+      return [{
+        textAnnotations: [{
+          description: 'Operacion exitosa\nS/ 131.00\nJueves 01 Octubre 2026 - 03:34 pm',
+        }],
+      }];
+    }
+  }
+
+  const { service, restore } = loadServiceWithMocks({
+    googleApplicationCredentials: path.join(process.cwd(), 'fake-google-creds.json'),
+    visionFactory: TextAnnotationsVisionClient,
+  });
+
+  try {
+    const result = await service.analyzeReceipt('data:image/png;base64,ZmFrZQ==');
+
+    assert.equal(result.monto, 131);
+    assert.equal(result.fecha, '2026-10-01 15:34');
+  } finally {
+    restore();
+  }
+});
+
+test('analyzeReceipt falls back to Tesseract when Vision returns no text', async () => {
+  class EmptyVisionClient {
+    async documentTextDetection() {
+      return [{}];
+    }
+  }
+
+  const { service, restore } = loadServiceWithMocks({
+    googleApplicationCredentials: path.join(process.cwd(), 'fake-google-creds.json'),
+    visionFactory: EmptyVisionClient,
+    recognizeImpl: async () => ({
+      data: {
+        text: 'Operacion exitosa\nS/ 131.00\nJueves 01 Octubre 2026 - 03:34 pm',
+      },
+    }),
+  });
+
+  try {
+    const result = await service.analyzeReceipt('data:image/png;base64,ZmFrZQ==');
+
+    assert.equal(result.monto, 131);
+    assert.equal(result.fecha, '2026-10-01 15:34');
+  } finally {
+    restore();
+  }
+});
+
 test('analyzeReceipt returns empty extraction when OCR finds no readable text', async () => {
   const { service, restore } = loadServiceWithMocks({
     recognizeImpl: async () => ({

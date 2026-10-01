@@ -18,15 +18,24 @@ async function analyzeReceipt(base64Image) {
   const engine = visionClient ? 'vision' : 'tesseract';
 
   try {
-    const rawText = visionClient
+    let rawText = visionClient
       ? await detectTextWithVision(base64Data, visionClient)
       : await detectTextWithTesseract(base64Data, 'Google Vision credentials are not configured');
+
+    if (!rawText || rawText.trim() === '') {
+      const fallbackText = visionClient
+        ? await detectTextWithTesseract(base64Data, 'Google Vision returned no readable text')
+        : '';
+      if (fallbackText && fallbackText.trim()) {
+        rawText = fallbackText;
+      }
+    }
 
     if (!rawText || rawText.trim() === '') {
       logger.warn('OCR completed without readable text', {
         context: {
           component: 'ocr.analyzeReceipt',
-          engine,
+          engine: visionClient ? `${engine}+tesseract-empty` : engine,
         },
       });
 
@@ -81,7 +90,7 @@ async function detectTextWithVision(base64Data, visionClient) {
     const [result] = await visionClient.documentTextDetection({
       image: { content: base64Data },
     });
-    return result.fullTextAnnotation ? result.fullTextAnnotation.text : '';
+    return result.fullTextAnnotation?.text || result.textAnnotations?.[0]?.description || '';
   } catch (visionError) {
     logger.warn('Google Vision OCR failed. Falling back to Tesseract.', {
       context: { component: 'ocr.visionFallback' },
