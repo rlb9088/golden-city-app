@@ -106,6 +106,52 @@ test('analyzeReceipt falls back to Tesseract when Vision request fails', async (
   }
 });
 
+test('analyzeReceipt returns empty extraction when OCR finds no readable text', async () => {
+  const { service, restore } = loadServiceWithMocks({
+    recognizeImpl: async () => ({
+      data: {
+        text: '',
+      },
+    }),
+  });
+
+  try {
+    const result = await service.analyzeReceipt('data:image/png;base64,ZmFrZQ==');
+
+    assert.equal(result.monto, null);
+    assert.equal(result.fecha, null);
+    assert.match(result.warning, /texto legible/i);
+  } finally {
+    restore();
+  }
+});
+
+test('analyzeReceipt returns empty extraction when all OCR engines fail', async () => {
+  class BrokenVisionClient {
+    async documentTextDetection() {
+      throw new Error('Vision unavailable');
+    }
+  }
+
+  const { service, restore } = loadServiceWithMocks({
+    googleApplicationCredentials: path.join(process.cwd(), 'fake-google-creds.json'),
+    visionFactory: BrokenVisionClient,
+    recognizeImpl: async () => {
+      throw new Error('Tesseract unavailable');
+    },
+  });
+
+  try {
+    const result = await service.analyzeReceipt('data:image/png;base64,ZmFrZQ==');
+
+    assert.equal(result.monto, null);
+    assert.equal(result.fecha, null);
+    assert.match(result.warning, /manualmente/i);
+  } finally {
+    restore();
+  }
+});
+
 test('normalizeTime convierte meridiem y conserva horas 24h ambiguas', () => {
   const { service, restore } = loadServiceWithMocks();
 

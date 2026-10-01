@@ -1132,6 +1132,7 @@ export async function analyzeOCR(base64Image: string) {
       monto: number | null;
       fecha: string | null;
       isMock?: boolean;
+      warning?: string;
     };
   }>('/api/ocr/analyze', {
     method: 'POST',

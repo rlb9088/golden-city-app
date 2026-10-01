@@ -23,7 +23,14 @@ async function analyzeReceipt(base64Image) {
       : await detectTextWithTesseract(base64Data, 'Google Vision credentials are not configured');
 
     if (!rawText || rawText.trim() === '') {
-      throw new Error('No se detecto texto en la imagen.');
+      logger.warn('OCR completed without readable text', {
+        context: {
+          component: 'ocr.analyzeReceipt',
+          engine,
+        },
+      });
+
+      return createEmptyOcrResult('No se detecto texto legible en la imagen.');
     }
 
     const { amount, date } = extractFinancialData(rawText);
@@ -45,12 +52,22 @@ async function analyzeReceipt(base64Image) {
       rawText: process.env.NODE_ENV === 'development' ? rawText : undefined,
     };
   } catch (error) {
-    logger.error('OCR processing failed', {
-      context: { component: 'ocr.analyzeReceipt' },
+    logger.warn('OCR processing failed. Returning empty extraction so manual input can continue.', {
+      context: { component: 'ocr.analyzeReceipt', engine },
       error,
     });
-    throw new Error('Error al procesar comprobante con OCR');
+
+    return createEmptyOcrResult('No se pudo procesar el comprobante con OCR. Ingresa los datos manualmente.');
   }
+}
+
+function createEmptyOcrResult(warning) {
+  return {
+    monto: null,
+    fecha: null,
+    isMock: false,
+    warning,
+  };
 }
 
 async function detectTextWithVision(base64Data, visionClient) {

@@ -85,7 +85,7 @@ export default function ReceiptUploader({ onOCRComplete, onError, resetToken }: 
       
       // In case of completely failing, but not an HTTP error
       if (!ocrMonto && !result.data.fecha) {
-        onError('OCR no logró detectar texto legible numérico en esta imagen.');
+        onError(result.data.warning || 'OCR no logró detectar texto legible numérico en esta imagen.');
       }
       
       setLastDetected(ocrMonto);
