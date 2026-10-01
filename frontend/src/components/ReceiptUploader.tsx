@@ -21,7 +21,7 @@ export default function ReceiptUploader({ onOCRComplete, onError, resetToken }: 
     setPreviewUrl(null);
   }, []);
 
-  // Helper para redimensionar la imagen antes de enviar a Vision API y persistirla.
+  // Helper para normalizar la imagen antes de enviarla a Vision API y persistirla.
   const resizeAndConvertImage = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -36,6 +36,7 @@ export default function ReceiptUploader({ onOCRComplete, onError, resetToken }: 
         let width = img.width;
         let height = img.height;
         const maxDim = 1200;
+        const minReadableDim = 1000;
 
         if (width > height && width > maxDim) {
           height = Math.round((height * maxDim) / width);
@@ -43,6 +44,10 @@ export default function ReceiptUploader({ onOCRComplete, onError, resetToken }: 
         } else if (height > maxDim) {
           width = Math.round((width * maxDim) / height);
           height = maxDim;
+        } else if (Math.max(width, height) < minReadableDim) {
+          const scale = minReadableDim / Math.max(width, height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
         }
 
         canvas.width = width;
@@ -50,12 +55,14 @@ export default function ReceiptUploader({ onOCRComplete, onError, resetToken }: 
 
         const ctx = canvas.getContext('2d');
         if (!ctx) return reject(new Error('No canvas text'));
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
 
         // Exportar como JPEG para reducir peso sin afectar OCR.
-        resolve(canvas.toDataURL('image/jpeg', 0.85));
+        resolve(canvas.toDataURL('image/jpeg', 0.95));
       };
 
       img.onerror = () => reject(new Error('Failed to load image'));
