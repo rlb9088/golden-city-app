@@ -7,13 +7,14 @@ import { formatCurrency, formatDate, getTodayLima } from '@/lib/format';
 import AlertBanner from '@/components/AlertBanner';
 import PaginationControls from '@/components/PaginationControls';
 import TableSkeleton from '@/components/TableSkeleton';
+import ListInput from '@/components/ListInput';
 import './gastos.css';
 
 const PAGE_SIZE = 50;
 
 export default function GastosPage() {
   const { isAdmin, user } = useAuth();
-  const [config, setConfig] = useState<{ bancos: string[]; bancos_full: ConfigBanco[]; categorias: Record<string, string[]> } | null>(null);
+  const [config, setConfig] = useState<{ bancos: string[]; bancos_full: ConfigBanco[]; categorias: Record<string, string[]>; conceptos_gasto: string[]; proveedores_gasto: string[] } | null>(null);
   const [scopedBancos, setScopedBancos] = useState<ConfigBanco[]>([]);
   const [gastos, setGastos] = useState<GastoRecord[]>([]);
   const [pagination, setPagination] = useState({ limit: PAGE_SIZE, offset: 0, total: 0, hasMore: false });
@@ -25,6 +26,8 @@ export default function GastosPage() {
   const [concepto, setConcepto] = useState('');
   const [categoria, setCategoria] = useState('');
   const [subcategoria, setSubcategoria] = useState('');
+  const [proveedor, setProveedor] = useState('');
+  const [nota, setNota] = useState('');
   const [banco, setBanco] = useState('');
   const [monto, setMonto] = useState('');
   const [fechaGasto, setFechaGasto] = useState(getTodayLima());
@@ -33,6 +36,8 @@ export default function GastosPage() {
     concepto: '',
     categoria: '',
     subcategoria: '',
+    proveedor: '',
+    nota: '',
     banco: '',
     monto: '',
     fecha_gasto: '',
@@ -60,6 +65,8 @@ export default function GastosPage() {
       concepto: gasto.concepto || '',
       categoria: gasto.categoria || '',
       subcategoria: gasto.subcategoria || '',
+      proveedor: gasto.proveedor || '',
+      nota: gasto.nota || '',
       banco: gasto.banco_id || '',
       monto: String(gasto.monto ?? ''),
       fecha_gasto: gasto.fecha_gasto || '',
@@ -94,6 +101,8 @@ export default function GastosPage() {
         concepto: editForm.concepto.trim(),
         categoria: editForm.categoria.trim(),
         subcategoria: editForm.subcategoria.trim(),
+        proveedor: editForm.proveedor.trim() || undefined,
+        nota: editForm.nota.trim(),
         banco_id: editForm.banco.trim(),
         monto: parsedMonto,
         fecha_gasto: editForm.fecha_gasto.trim(),
@@ -179,13 +188,13 @@ export default function GastosPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!concepto.trim() || !banco.trim() || !scopedBancos.length || !monto || parseFloat(monto) <= 0) {
-      setAlert({ type: 'error', message: 'Completa concepto, banco y monto válido' });
+    if (!concepto.trim() || !proveedor.trim() || !banco.trim() || !scopedBancos.length || !monto || parseFloat(monto) <= 0) {
+      setAlert({ type: 'error', message: 'Completa concepto, proveedor, banco y monto válido' });
       return;
     }
     try {
       setSubmitting(true);
-      const response = await createGasto({ concepto: concepto.trim(), categoria, subcategoria, banco_id: banco, monto: parseFloat(monto), fecha_gasto: fechaGasto });
+      const response = await createGasto({ concepto: concepto.trim(), categoria, subcategoria, proveedor: proveedor.trim(), nota: nota.trim(), banco_id: banco, monto: parseFloat(monto), fecha_gasto: fechaGasto });
       const warningMessage = response.warnings?.length
         ? `Gasto registrado con observaciones: ${response.warnings.join(' • ')}`
         : '';
@@ -195,6 +204,8 @@ export default function GastosPage() {
           : { type: 'success', message: `Gasto de ${formatCurrency(parseFloat(monto))} registrado` },
       );
       setConcepto('');
+      setProveedor('');
+      setNota('');
       setMonto('');
       setFechaGasto(getTodayLima());
       conceptoRef.current?.focus();
@@ -267,8 +278,17 @@ export default function GastosPage() {
           </div>
           <div className="field-group">
             <label className="label" htmlFor="concepto-input">Concepto</label>
-            <input ref={conceptoRef} className="input" id="concepto-input" value={concepto}
-              onChange={(e) => setConcepto(e.target.value)} placeholder="Descripción del gasto" required />
+            <ListInput ref={conceptoRef} id="concepto-input" value={concepto} options={config.conceptos_gasto || []}
+              onChange={setConcepto} placeholder="Selecciona o escribe para buscar" required />
+          </div>
+          <div className="field-group">
+            <label className="label" htmlFor="proveedor-input">Proveedor</label>
+            <ListInput id="proveedor-input" value={proveedor} options={config.proveedores_gasto || []}
+              onChange={setProveedor} placeholder="Selecciona o escribe para buscar" required />
+          </div>
+          <div className="field-group">
+            <label className="label">Dominio</label>
+            <input className="input" value="Gasto (OPEX)" readOnly disabled />
           </div>
           <div className="field-group">
             <label className="label" htmlFor="categoria-select">Categoría</label>
@@ -297,6 +317,10 @@ export default function GastosPage() {
             <input className="input" id="monto-gasto" type="number" step="0.01" min="0.01"
               value={monto} onChange={(e) => setMonto(e.target.value)} placeholder="0.00" required />
           </div>
+          <div className="field-group">
+            <label className="label" htmlFor="nota-gasto">Nota</label>
+            <input className="input" id="nota-gasto" value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Opcional" />
+          </div>
         </div>
         <div className="form-actions">
           <button className="btn btn-primary" type="submit" disabled={submitting || loading || !config} id="submit-gasto">
@@ -311,12 +335,13 @@ export default function GastosPage() {
         ) : (
           <div className="table-container">
             <table className="table" id="gastos-table">
-              <thead><tr><th>Fecha Gasto</th><th>Concepto</th><th>Categoría</th><th>Banco</th><th style={{textAlign:'right'}}>Monto</th>{isAdmin && <th style={{textAlign:'right'}}>Acciones</th>}</tr></thead>
+              <thead><tr><th>Fecha Gasto</th><th>Concepto</th><th>Proveedor</th><th>Categoría</th><th>Banco</th><th style={{textAlign:'right'}}>Monto</th>{isAdmin && <th style={{textAlign:'right'}}>Acciones</th>}</tr></thead>
               <tbody>
                 {gastos.map((g, idx) => (
                   <tr key={g.id || idx} className="mov-row">
                     <td><strong>{formatDate(g.fecha_gasto)}</strong></td>
-                    <td><strong>{g.concepto}</strong></td>
+                    <td><strong>{g.concepto}</strong>{g.nota && <div className="text-muted" style={{ fontSize: '0.8rem' }}>{g.nota}</div>}</td>
+                    <td>{g.proveedor || <span className="text-muted">—</span>}</td>
                     <td><span className="badge badge-gold">{g.categoria}</span> {g.subcategoria && <span className="text-muted">/ {g.subcategoria}</span>}</td>
                     <td><span className="badge badge-blue">{g.banco}</span></td>
                     <td className="text-right"><span className="amount amount-negative">{formatCurrency(g.monto)}</span></td>
@@ -359,7 +384,15 @@ export default function GastosPage() {
               <div className="modal-grid">
                 <label className="field-group">
                   <span className="label">Concepto</span>
-                  <input className="input" value={editForm.concepto} onChange={(e) => setEditForm((current) => ({ ...current, concepto: e.target.value }))} required />
+                  <ListInput value={editForm.concepto} options={config.conceptos_gasto || []} onChange={(value) => setEditForm((current) => ({ ...current, concepto: value }))} required />
+                </label>
+                <label className="field-group">
+                  <span className="label">Proveedor</span>
+                  <ListInput value={editForm.proveedor} options={config.proveedores_gasto || []} onChange={(value) => setEditForm((current) => ({ ...current, proveedor: value }))} />
+                </label>
+                <label className="field-group">
+                  <span className="label">Nota</span>
+                  <input className="input" value={editForm.nota} onChange={(e) => setEditForm((current) => ({ ...current, nota: e.target.value }))} />
                 </label>
                 <label className="field-group">
                   <span className="label">Categoría</span>

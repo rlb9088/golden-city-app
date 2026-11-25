@@ -80,6 +80,7 @@ function loadService({ serviceName, getAll, getConfigBancoById = async (bancoId)
     loaded: true,
     exports: {
       validateReferences: async () => [],
+      assertCatalogValue: async (_table, _label, value) => String(value).trim(),
       getConfigBancoById,
     },
   };
