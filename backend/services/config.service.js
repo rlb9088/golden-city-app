@@ -16,11 +16,19 @@ const { createPrefixedId } = require('../utils/id');
 const TABLES = {
   agentes: { sheet: 'config_agentes', headers: ['id', 'nombre', 'username', 'password_hash', 'role', 'activo'] },
   categorias: { sheet: 'config_categorias', headers: ['id', 'categoria', 'subcategoria'] },
+  categorias_reparto: { sheet: 'config_categorias_reparto', headers: ['id', 'dominio', 'categoria', 'subcategoria'] },
+  conceptos_gasto: { sheet: 'config_conceptos_gasto', headers: ['id', 'nombre'] },
+  proveedores_gasto: { sheet: 'config_proveedores_gasto', headers: ['id', 'nombre'] },
+  conceptos_reparto: { sheet: 'config_conceptos_reparto', headers: ['id', 'nombre'] },
+  proveedores_reparto: { sheet: 'config_proveedores_reparto', headers: ['id', 'nombre'] },
   bancos: { sheet: 'config_bancos', headers: ['id', 'nombre', 'propietario', 'propietario_id'] },
   cajas: { sheet: 'config_cajas', headers: ['id', 'nombre'] },
   usuarios: { sheet: 'config_usuarios', headers: ['id', 'nombre'] },
   tipos_pago: { sheet: 'config_tipos_pago', headers: ['id', 'nombre'] },
 };
+
+// Listas oficiales cuyo `nombre` debe ser unico (sin distinguir mayusculas) para mantener datos homogeneos.
+const UNIQUE_NAME_TABLES = new Set(['conceptos_gasto', 'proveedores_gasto', 'conceptos_reparto', 'proveedores_reparto']);
 
 const SETTINGS_SHEET = 'config_settings';
 const SETTINGS_HEADERS = ['key', 'value', 'fecha_efectiva', 'actualizado_por', 'actualizado_en'];
@@ -955,10 +963,29 @@ async function validateReferences(checks, user = 'system', entity = 'registro') 
   return warnings;
 }
 
+async function assertUniqueCatalogName(tableName, nombre, excludeId = null) {
+  if (!UNIQUE_NAME_TABLES.has(tableName)) {
+    return;
+  }
+
+  const normalized = normalizeLookup(nombre);
+  if (!normalized) {
+    throw new BadRequestError('El nombre es obligatorio.', { context: { tableName } });
+  }
+
+  const rows = await repo.getAll(TABLES[tableName].sheet);
+  const duplicate = rows.find((row) => row.id !== excludeId && normalizeLookup(row.nombre) === normalized);
+  if (duplicate) {
+    throw new BadRequestError(`"${normalizeText(nombre)}" ya existe en la lista.`, {
+      context: { tableName, nombre: normalizeText(nombre) },
+    });
+  }
+}
+
 async function addToTable(tableName, item, user = 'system') {
   assertTable(tableName);
   const { sheet, headers } = TABLES[tableName];
-  const normalizedItem = tableName === 'bancos'
+  let normalizedItem = tableName === 'bancos'
     ? await normalizeBancoRecord(item, { requireOwner: true })
     : item;
 
@@ -970,6 +997,11 @@ async function addToTable(tableName, item, user = 'system') {
     authService.clearAuthUserCache();
     await audit.log('create', `config_${tableName}`, user, stripInternalFields(record));
     return sanitizeAgentRow(record);
+  }
+
+  if (UNIQUE_NAME_TABLES.has(tableName)) {
+    normalizedItem = { ...normalizedItem, nombre: normalizeText(normalizedItem?.nombre) };
+    await assertUniqueCatalogName(tableName, normalizedItem.nombre);
   }
 
   const record = createConfigRecord(tableName, normalizedItem);
@@ -1090,6 +1122,11 @@ async function updateInTable(tableName, id, patch = {}, user = 'system') {
     ? await normalizeBancoRecord(pickPatchFields(tableName, patch))
     : pickPatchFields(tableName, patch);
 
+  if (UNIQUE_NAME_TABLES.has(tableName) && Object.prototype.hasOwnProperty.call(nextPatch, 'nombre')) {
+    nextPatch.nombre = normalizeText(nextPatch.nombre);
+    await assertUniqueCatalogName(tableName, nextPatch.nombre, id);
+  }
+
   if (existingRecord) {
     const nextRecord = buildUpdatedRecord(existingRecord, nextPatch, tableName);
     await repo.update(sheet, existingRecord._rowIndex, nextRecord, headers);
@@ -1204,9 +1241,19 @@ async function importBatch(tableName, items, user = 'system') {
   assertTable(tableName);
   const { sheet, headers } = TABLES[tableName];
   const records = [];
+  const seenNames = new Set();
 
   for (const item of items) {
     let normalizedItem = item;
+    if (UNIQUE_NAME_TABLES.has(tableName)) {
+      normalizedItem = { ...item, nombre: normalizeText(item?.nombre) };
+      const key = normalizeLookup(normalizedItem.nombre);
+      if (seenNames.has(key)) {
+        throw new BadRequestError(`"${normalizedItem.nombre}" esta repetido en la importacion.`, { context: { tableName } });
+      }
+      seenNames.add(key);
+      await assertUniqueCatalogName(tableName, normalizedItem.nombre);
+    }
     if (tableName === 'bancos') {
       normalizedItem = await normalizeBancoRecord(item, { requireOwner: true });
     } else if (isAgentTable(tableName)) {
@@ -1234,14 +1281,44 @@ async function importBatch(tableName, items, user = 'system') {
 /**
  * Returns the full config object for the app (replaces hardcoded /api/config).
  */
+/**
+ * Valida que `value` exista en una lista oficial (tabla de config con campo `nombre`).
+ * Devuelve el nombre canonico (tal como esta en la lista) o lanza BadRequestError.
+ */
+async function assertCatalogValue(tableName, label, value) {
+  const text = normalizeText(value);
+  if (!text) {
+    throw new BadRequestError(`${label} es requerido.`, { context: { tableName } });
+  }
+
+  const rows = await getTable(tableName);
+  const match = rows.find((row) => normalizeLookup(row.nombre) === normalizeLookup(text));
+  if (!match) {
+    throw new BadRequestError(
+      `${label} "${text}" no esta en la lista oficial. Agregalo primero en Configuracion.`,
+      { context: { tableName, value: text } },
+    );
+  }
+
+  return normalizeText(match.nombre);
+}
+
 async function getFullConfig() {
-  const [agentes, categorias, bancos, cajas, usuarios, tiposPago] = await Promise.all([
+  const [
+    agentes, categorias, bancos, cajas, usuarios, tiposPago,
+    categoriasReparto, conceptosGasto, proveedoresGasto, conceptosReparto, proveedoresReparto,
+  ] = await Promise.all([
     getTable('agentes'),
     getTable('categorias'),
     getTable('bancos'),
     getTable('cajas'),
     getTable('usuarios'),
     getTable('tipos_pago'),
+    getTable('categorias_reparto'),
+    getTable('conceptos_gasto'),
+    getTable('proveedores_gasto'),
+    getTable('conceptos_reparto'),
+    getTable('proveedores_reparto'),
   ]);
 
   // Transform categorias into grouped format
@@ -1251,7 +1328,22 @@ async function getFullConfig() {
     if (c.subcategoria) categoriasMap[c.categoria].push(c.subcategoria);
   });
 
+  const categoriasRepartoMap = {};
+  const dominiosReparto = {};
+  categoriasReparto.forEach((c) => {
+    if (!categoriasRepartoMap[c.categoria]) categoriasRepartoMap[c.categoria] = [];
+    if (c.subcategoria) categoriasRepartoMap[c.categoria].push(c.subcategoria);
+    if (c.dominio) dominiosReparto[c.categoria] = c.dominio;
+  });
+
   return {
+    categorias_reparto: categoriasRepartoMap,
+    categorias_reparto_full: categoriasReparto,
+    dominios_reparto: dominiosReparto,
+    conceptos_gasto: getUniqueLabels(conceptosGasto, 'nombre'),
+    proveedores_gasto: getUniqueLabels(proveedoresGasto, 'nombre'),
+    conceptos_reparto: getUniqueLabels(conceptosReparto, 'nombre'),
+    proveedores_reparto: getUniqueLabels(proveedoresReparto, 'nombre'),
     agentes: getUniqueLabels(agentes, 'nombre'),
     agentes_full: agentes,
     categorias: categoriasMap,
@@ -1286,4 +1378,5 @@ module.exports = {
   getFullConfig,
   existsInTable,
   validateReferences,
+  assertCatalogValue,
 };

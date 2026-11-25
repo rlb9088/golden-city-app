@@ -1,0 +1,228 @@
+{
+  "categorias_gasto": [
+    {
+      "categoria": "Gastos Administrativos",
+      "subcategoria": "Capacitaciones"
+    },
+    {
+      "categoria": "Gastos Administrativos",
+      "subcategoria": "Herramientas de IA"
+    },
+    {
+      "categoria": "Gastos Administrativos",
+      "subcategoria": "Herramientas/Suscripciones no IA"
+    },
+    {
+      "categoria": "Gastos Administrativos",
+      "subcategoria": "Hostings, Dominios."
+    },
+    {
+      "categoria": "Gastos Administrativos",
+      "subcategoria": "ITFs, Ajustes, Pruebas y Cuadres de caja"
+    },
+    {
+      "categoria": "Gastos Administrativos",
+      "subcategoria": "Otros gastos administrativos"
+    },
+    {
+      "categoria": "Gastos Administrativos",
+      "subcategoria": "Proxys, VPNs."
+    },
+    {
+      "categoria": "Gastos Administrativos",
+      "subcategoria": "Telefonía"
+    },
+    {
+      "categoria": "Gastos de Marketing",
+      "subcategoria": "Eventos Externos"
+    },
+    {
+      "categoria": "Gastos de Marketing",
+      "subcategoria": "Eventos Internos"
+    },
+    {
+      "categoria": "Gastos de Marketing",
+      "subcategoria": "Material Audiovisual y Branding"
+    },
+    {
+      "categoria": "Gastos de Marketing",
+      "subcategoria": "Otros gastos de Marketing"
+    },
+    {
+      "categoria": "Gastos de Marketing",
+      "subcategoria": "Redes sociales y plataformas"
+    },
+    {
+      "categoria": "Gastos de Marketing",
+      "subcategoria": "Regalos especiales a clientes"
+    },
+    {
+      "categoria": "Gastos de Personal",
+      "subcategoria": "Agentes"
+    },
+    {
+      "categoria": "Gastos de Personal",
+      "subcategoria": "Atención al cliente"
+    },
+    {
+      "categoria": "Gastos de Personal",
+      "subcategoria": "Gerencia"
+    },
+    {
+      "categoria": "Gastos de Personal",
+      "subcategoria": "Otros gastos de personal"
+    },
+    {
+      "categoria": "Gastos de Personal",
+      "subcategoria": "Personal Administrativo"
+    }
+  ],
+  "categorias_reparto": [
+    {
+      "dominio": "Inversión",
+      "categoria": "Inversión en Plataformas y sistemas",
+      "subcategoria": "Implementación de metodos de pago o similares"
+    },
+    {
+      "dominio": "Inversión",
+      "categoria": "Inversión en Plataformas y sistemas",
+      "subcategoria": "Implementación de plataforma"
+    },
+    {
+      "dominio": "Inversión",
+      "categoria": "Inversión en Plataformas y sistemas",
+      "subcategoria": "Otras inversiones de plataformas y sistemas"
+    },
+    {
+      "dominio": "Inversión",
+      "categoria": "Inversión en Publicidad",
+      "subcategoria": "Inversión en Bonos de captación"
+    },
+    {
+      "dominio": "Inversión",
+      "categoria": "Inversión en Publicidad",
+      "subcategoria": "Inversión en Google Ads"
+    },
+    {
+      "dominio": "Inversión",
+      "categoria": "Inversión en Publicidad",
+      "subcategoria": "Inversión en Meta Ads"
+    },
+    {
+      "dominio": "Inversión",
+      "categoria": "Inversión en Publicidad",
+      "subcategoria": "Inversión en Regalos especiales"
+    },
+    {
+      "dominio": "Inversión",
+      "categoria": "Inversión en Publicidad",
+      "subcategoria": "Inversión en Sistema de Contingencia Ads"
+    },
+    {
+      "dominio": "Inversión",
+      "categoria": "Inversión en Publicidad",
+      "subcategoria": "Inversión en Streamers, influencers y similares"
+    },
+    {
+      "dominio": "Inversión",
+      "categoria": "Inversión en Publicidad",
+      "subcategoria": "Inversión en Tiktok Ads"
+    },
+    {
+      "dominio": "Inversión",
+      "categoria": "Inversión en Publicidad",
+      "subcategoria": "Inversión en otras plataformas de Ads"
+    },
+    {
+      "dominio": "Inversión",
+      "categoria": "Inversión en Publicidad",
+      "subcategoria": "Otras inversiones de publicidad"
+    },
+    {
+      "dominio": "Inversión",
+      "categoria": "Inversión en registros y aspectos legales",
+      "subcategoria": "Inversión en registros y aspectos legales"
+    },
+    {
+      "dominio": "Inversión",
+      "categoria": "Otras inversiones",
+      "subcategoria": "Inversiones deportivas"
+    },
+    {
+      "dominio": "Inversión",
+      "categoria": "Otras inversiones",
+      "subcategoria": "Otras inversiones"
+    },
+    {
+      "dominio": "Reparto socios",
+      "categoria": "Reparto Beneficios",
+      "subcategoria": "Otros repartos de beneficios"
+    },
+    {
+      "dominio": "Reparto socios",
+      "categoria": "Reparto Beneficios",
+      "subcategoria": "Socio 1"
+    },
+    {
+      "dominio": "Reparto socios",
+      "categoria": "Reparto Beneficios",
+      "subcategoria": "Socio 2"
+    }
+  ],
+  "conceptos_gasto": [
+    "Upstash",
+    "New ip now",
+    "ITF",
+    "Pago por error",
+    "Recarga Bitel",
+    "Railway",
+    "Recarga Entel",
+    "Pago sin retiro",
+    "Pago en exceso",
+    "Chat gpt",
+    "Claude",
+    "Bana Hosting",
+    "Telegram premium",
+    "Contabo VPS",
+    "Mullvad vpn",
+    "Pago primera quincena Julio A.",
+    "Pago segunda quincena Julio A.",
+    "Pago mensualidad Paolo V.",
+    "Cuadre de caja"
+  ],
+  "proveedores_gasto": [
+    "Upstash",
+    "New ip now",
+    "Sin proveedor",
+    "Bitel",
+    "Railway",
+    "Entel",
+    "Open AI",
+    "Antropic",
+    "Bana Hosting",
+    "Telegram",
+    "Contabo",
+    "Mullvad",
+    "Julio",
+    "Paolo",
+    "Corporación Win",
+    "Canva",
+    "Fal AI",
+    "Proton",
+    "Claro",
+    "Hostinger"
+  ],
+  "conceptos_reparto": [
+    "Pago Socio 1",
+    "Pago Socio 2",
+    "Recarga Meta Ads",
+    "Balance bonos de captación del mes",
+    "Balance Bookies del mes"
+  ],
+  "proveedores_reparto": [
+    "Sin proveedor",
+    "Rodrigo",
+    "Salvatore",
+    "Meta"
+  ]
+}

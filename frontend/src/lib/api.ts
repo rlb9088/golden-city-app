@@ -113,6 +113,25 @@ export interface GastoRecord {
   monto: string | number;
   fecha_gasto: string;
   fecha_registro?: string;
+  dominio?: string;
+  proveedor?: string;
+  nota?: string;
+}
+
+export interface RepartoRecord {
+  id: string;
+  estado?: string;
+  concepto: string;
+  categoria: string;
+  subcategoria?: string;
+  dominio: string;
+  proveedor: string;
+  nota?: string;
+  banco_id: string;
+  banco: string;
+  monto: string | number;
+  fecha_movimiento: string;
+  fecha_registro?: string;
 }
 
 export interface BancoRecord {
@@ -558,6 +577,13 @@ export async function getConfig() {
     categorias_full: Record<string, string>[];
     usuarios_full: Record<string, string>[];
     tipos_pago_full: Record<string, string>[];
+    // Listas oficiales (gastos / repartos e inversiones)
+    conceptos_gasto: string[];
+    proveedores_gasto: string[];
+    conceptos_reparto: string[];
+    proveedores_reparto: string[];
+    categorias_reparto: Record<string, string[]>;
+    dominios_reparto: Record<string, string>;
     };
   }>('/api/config');
 
@@ -749,6 +775,8 @@ export async function createGasto(data: {
   banco_id: string;
   monto: number;
   fecha_gasto: string;
+  proveedor: string;
+  nota?: string;
 }) {
   return request<MutationResponse<Record<string, string>>>('/api/gastos', {
     method: 'POST',
@@ -782,6 +810,8 @@ export async function updateGasto(id: string, data: {
   banco_id: string;
   monto?: number;
   fecha_gasto?: string;
+  proveedor?: string;
+  nota?: string;
 }) {
   return request<{ status: string; data: GastoRecord }>(`/api/gastos/${encodeURIComponent(id)}`, {
     method: 'PUT',
@@ -791,6 +821,47 @@ export async function updateGasto(id: string, data: {
 
 export async function deleteGasto(id: string): Promise<void> {
   await request(`/api/gastos/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+// Repartos e inversiones (informativo: no afecta caja ni balance)
+export interface RepartoPayload {
+  concepto: string;
+  categoria: string;
+  subcategoria?: string;
+  proveedor: string;
+  nota?: string;
+  banco_id: string;
+  monto: number;
+  fecha_movimiento: string;
+}
+
+export async function createReparto(data: RepartoPayload) {
+  return request<MutationResponse<Record<string, string>>>('/api/repartos', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function getRepartos(filters: { limit?: number; offset?: number } = {}) {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && String(value).trim()) {
+      params.set(key, String(value));
+    }
+  });
+  const query = params.toString();
+  return request<{ status: string; data: PaginatedResponse<RepartoRecord> }>(`/api/repartos${query ? `?${query}` : ''}`);
+}
+
+export async function updateReparto(id: string, data: Partial<RepartoPayload> & { banco_id: string }) {
+  return request<{ status: string; data: RepartoRecord }>(`/api/repartos/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteReparto(id: string): Promise<void> {
+  await request(`/api/repartos/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 // Bancos
