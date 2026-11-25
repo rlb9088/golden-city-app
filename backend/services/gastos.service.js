@@ -1,14 +1,13 @@
 const repo = require('../repositories/sheetsRepository');
 const audit = require('./audit.service');
 const { nowLima } = require('../config/timezone');
-const { validateReferences, getConfigBancoById, assertCatalogValue } = require('./config.service');
+const { validateReferences, getConfigBancoById } = require('./config.service');
 const { ForbiddenError, NotFoundError } = require('../utils/appError');
 const { paginateItems } = require('../utils/pagination');
 const { createPrefixedId } = require('../utils/id');
 
 const SHEET_NAME = 'gastos';
-const HEADERS = ['id', 'estado', 'fecha_gasto', 'fecha_registro', 'concepto', 'categoria', 'subcategoria', 'banco_id', 'banco', 'monto', 'dominio', 'proveedor', 'nota'];
-const DOMINIO_GASTO = 'Gasto (OPEX)';
+const HEADERS = ['id', 'estado', 'fecha_gasto', 'fecha_registro', 'concepto', 'categoria', 'subcategoria', 'banco_id', 'banco', 'monto'];
 
 function normalizeText(value) {
   return String(value ?? '').trim().toLowerCase();
@@ -139,19 +138,12 @@ function filterGastos(gastos, filters = {}) {
   });
 }
 
-function withGastoDefaults(record) {
-  return { ...record, dominio: record.dominio || DOMINIO_GASTO };
-}
-
 function stripInternalFields(record) {
   const { _rowIndex, ...rest } = record;
   return rest;
 }
 
 async function create(data, caller) {
-  const concepto = await assertCatalogValue('conceptos_gasto', 'Concepto', data.concepto);
-  const proveedor = await assertCatalogValue('proveedores_gasto', 'Proveedor', data.proveedor);
-
   const warnings = await validateReferences([
     {
       tableName: 'categorias',
@@ -187,15 +179,12 @@ async function create(data, caller) {
     estado: 'activo',
     fecha_gasto: data.fecha_gasto,
     fecha_registro: nowLima(),
-    concepto,
+    concepto: data.concepto,
     categoria: data.categoria,
     subcategoria: data.subcategoria || '',
     banco_id: bancoDetails.banco_id,
     banco: bancoDetails.banco,
     monto: data.monto,
-    dominio: DOMINIO_GASTO,
-    proveedor,
-    nota: String(data.nota ?? '').trim(),
   };
 
   await repo.append(SHEET_NAME, gasto, HEADERS);
@@ -215,7 +204,7 @@ function sortGastosForList(gastos) {
 async function getPagedAndFiltered(filters = {}, limit, offset) {
   const gastos = await getAll();
   const filtered = filterGastos(gastos, filters);
-  return paginateItems(sortGastosForList(filtered).map(withGastoDefaults), limit, offset);
+  return paginateItems(sortGastosForList(filtered), limit, offset);
 }
 
 async function getPaged(limit, offset, filters = {}) {
@@ -223,8 +212,7 @@ async function getPaged(limit, offset, filters = {}) {
 }
 
 async function getById(id) {
-  const gasto = await repo.findById(SHEET_NAME, id);
-  return gasto ? withGastoDefaults(gasto) : gasto;
+  return repo.findById(SHEET_NAME, id);
 }
 
 function buildUpdatedGasto(existing, updates) {
@@ -248,19 +236,6 @@ async function update(id, updates, caller) {
     });
   }
 
-  // Solo se exige lista oficial si el valor cambia: los gastos historicos pueden tener texto libre.
-  const normalizedUpdates = { ...updates };
-  if (updates.concepto !== undefined && normalizeText(updates.concepto) !== normalizeText(existing.concepto)) {
-    normalizedUpdates.concepto = await assertCatalogValue('conceptos_gasto', 'Concepto', updates.concepto);
-  }
-  if (updates.proveedor !== undefined && normalizeText(updates.proveedor) !== normalizeText(existing.proveedor)) {
-    normalizedUpdates.proveedor = await assertCatalogValue('proveedores_gasto', 'Proveedor', updates.proveedor);
-  }
-  if (updates.nota !== undefined) {
-    normalizedUpdates.nota = String(updates.nota ?? '').trim();
-  }
-  updates = normalizedUpdates;
-
   const nextBancoReference = Object.prototype.hasOwnProperty.call(updates, 'banco_id')
     ? updates.banco_id
     : existing.banco_id;
@@ -282,7 +257,6 @@ async function update(id, updates, caller) {
   let nextRecord = buildUpdatedGasto(existing, updates);
   nextRecord = {
     ...nextRecord,
-    dominio: existing.dominio || DOMINIO_GASTO,
     banco_id: bancoDetails.banco_id,
     banco: bancoDetails.banco,
   };
@@ -320,9 +294,6 @@ async function remove(id, caller) {
 }
 
 module.exports = {
-  assertBancoOwnershipForCaller,
-  getAuthLabel,
-  normalizeDateOnly,
   create,
   getAll,
   getPaged,

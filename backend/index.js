@@ -114,7 +114,6 @@ app.use('/api/auth', require('./routes/auth.routes'));
 app.use('/api/pagos', require('./routes/pagos.routes'));
 app.use('/api/ingresos', require('./routes/ingresos.routes'));
 app.use('/api/gastos', require('./routes/gastos.routes'));
-app.use('/api/repartos', require('./routes/repartos.routes'));
 app.use('/api/bancos', require('./routes/bancos.routes'));
 app.use('/api/depositos-totales', require('./routes/depositos-totales.routes'));
 app.use('/api/bonos-totales', require('./routes/bonos-totales.routes'));

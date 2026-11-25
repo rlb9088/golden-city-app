@@ -8,8 +8,6 @@ const gastoSchema = z.object({
   banco: z.string().optional().default(''),
   monto: z.number().positive('Monto debe ser mayor a 0'),
   fecha_gasto: z.string().min(1, 'Fecha del gasto es requerida'),
-  proveedor: z.string().trim().min(1, 'Proveedor es requerido'),
-  nota: z.string().optional().default(''),
 });
 
 const gastoUpdateSchema = z.object({
@@ -20,8 +18,6 @@ const gastoUpdateSchema = z.object({
   banco: z.string().optional().default(''),
   monto: z.number().positive('Monto debe ser mayor a 0').optional(),
   fecha_gasto: z.string().min(1, 'Fecha del gasto es requerida').optional(),
-  proveedor: z.string().trim().min(1, 'Proveedor es requerido').optional(),
-  nota: z.string().optional(),
 }).refine((data) => Object.values(data).some((value) => value !== undefined), {
   message: 'Debes enviar al menos un campo para actualizar.',
 });

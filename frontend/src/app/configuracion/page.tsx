@@ -29,11 +29,6 @@ const SLOTS_ACCESS_URL_KEY = 'clientes_slots_access_url';
 const TABS = [
   { id: 'agentes', label: '👤 Agentes' },
   { id: 'categorias', label: '🏷️ Categorías Gastos' },
-  { id: 'conceptos_gasto', label: '📝 Conceptos Gastos' },
-  { id: 'proveedores_gasto', label: '🏢 Proveedores Gastos' },
-  { id: 'categorias_reparto', label: '🏷️ Categorías Reparto' },
-  { id: 'conceptos_reparto', label: '📝 Conceptos Reparto' },
-  { id: 'proveedores_reparto', label: '🏢 Proveedores Reparto' },
   { id: 'bancos', label: '🏦 Bancos' },
   { id: 'cajas', label: '💰 Cajas' },
   { id: 'tipos_pago', label: '💳 Tipos de Pago' },
@@ -44,15 +39,6 @@ const EDIT_FIELDS = {
   categorias: [
     { key: 'categoria', label: 'Categoría Principal', placeholder: 'Ej: Operativo' },
     { key: 'subcategoria', label: 'Subcategoría (Opcional)', placeholder: 'Ej: Limpieza' },
-  ],
-  conceptos_gasto: [{ key: 'nombre', label: 'Concepto', placeholder: 'Ej: Railway' }],
-  proveedores_gasto: [{ key: 'nombre', label: 'Proveedor', placeholder: 'Ej: Railway' }],
-  conceptos_reparto: [{ key: 'nombre', label: 'Concepto', placeholder: 'Ej: Pago Socio 1' }],
-  proveedores_reparto: [{ key: 'nombre', label: 'Proveedor', placeholder: 'Ej: Meta' }],
-  categorias_reparto: [
-    { key: 'dominio', label: 'Dominio (Inversión / Reparto socios)', placeholder: 'Inversión' },
-    { key: 'categoria', label: 'Categoría Principal', placeholder: 'Ej: Inversión en Publicidad' },
-    { key: 'subcategoria', label: 'Subcategoría', placeholder: 'Ej: Inversión en Meta Ads' },
   ],
   bancos: [
     { key: 'nombre', label: 'Nombre del Banco/Wallet', placeholder: 'Ej: Yape' },
@@ -68,13 +54,6 @@ const EDIT_FIELDS = {
     { key: 'nombre', label: 'Nombre de Jugador', placeholder: 'Ej: Juan Perez' },
   ],
 } as const;
-
-const NAME_LIST_TABS: Record<string, { field: string; placeholder: string; help: string }> = {
-  conceptos_gasto: { field: 'Concepto', placeholder: 'Ej: Railway', help: 'Lista oficial de conceptos para el módulo de Gastos. Solo estos valores se pueden usar al registrar.' },
-  proveedores_gasto: { field: 'Proveedor', placeholder: 'Ej: Railway', help: 'Lista oficial de proveedores para el módulo de Gastos.' },
-  conceptos_reparto: { field: 'Concepto', placeholder: 'Ej: Pago Socio 1', help: 'Lista oficial de conceptos para Reparto e Inversiones.' },
-  proveedores_reparto: { field: 'Proveedor', placeholder: 'Ej: Meta', help: 'Lista oficial de proveedores para Reparto e Inversiones.' },
-};
 
 type TabKey = (typeof TABS)[number]['id'];
 type ConfigRow = Record<string, string | boolean | undefined> & { id: string };
@@ -168,8 +147,6 @@ export default function ConfiguracionPage() {
   const [newSubcat, setNewSubcat] = useState('');
   const [newBanco, setNewBanco] = useState('');
   const [newPropietarioId, setNewPropietarioId] = useState('');
-  const [newNombre, setNewNombre] = useState('');
-  const [newDominio, setNewDominio] = useState('Inversión');
   const [newCaja, setNewCaja] = useState('');
   const [newTipoPago, setNewTipoPago] = useState('');
   const [csvText, setCsvText] = useState('');
@@ -449,7 +426,6 @@ export default function ConfiguracionPage() {
       setNewPropietarioId(agentes[0]?.id || '');
       setNewCaja('');
       setNewTipoPago('');
-      setNewNombre('');
     } catch (err) {
       setAlert({ type: 'error', message: err instanceof Error ? err.message : 'Error al añadir' });
     } finally {
@@ -1069,44 +1045,6 @@ export default function ConfiguracionPage() {
               <button className="btn btn-primary" type="submit" disabled={submitting || loading}>➕ Agregar</button>
             </form>
             <Table data={data} columns={[{ key: 'nombre', label: 'Nombre' }]} onEdit={openEditModal} onDelete={handleDelete} loading={loading} />
-          </>
-        )}
-
-        {NAME_LIST_TABS[activeTab] && (
-          <>
-            <p className="text-muted" style={{ marginBottom: '1rem', fontSize: '0.9rem' }}>{NAME_LIST_TABS[activeTab].help}</p>
-            <form className="add-row-form" onSubmit={(event) => { event.preventDefault(); if (newNombre.trim()) void handleAddGeneric({ nombre: newNombre.trim() }); }}>
-              <div className="field-group">
-                <label className="label">{NAME_LIST_TABS[activeTab].field}</label>
-                <input className="input" value={newNombre} onChange={(event) => setNewNombre(event.target.value)} required placeholder={NAME_LIST_TABS[activeTab].placeholder} />
-              </div>
-              <button className="btn btn-primary" type="submit" disabled={submitting || loading}>➕ Agregar</button>
-            </form>
-            <Table data={data} columns={[{ key: 'nombre', label: NAME_LIST_TABS[activeTab].field }]} onEdit={openEditModal} onDelete={handleDelete} loading={loading} />
-          </>
-        )}
-
-        {activeTab === 'categorias_reparto' && (
-          <>
-            <form className="add-row-form" onSubmit={(event) => { event.preventDefault(); if (newCat && newSubcat) void handleAddGeneric({ dominio: newDominio, categoria: newCat, subcategoria: newSubcat }); }}>
-              <div className="field-group">
-                <label className="label">Dominio</label>
-                <select className="select" value={newDominio} onChange={(event) => setNewDominio(event.target.value)}>
-                  <option value="Inversión">Inversión</option>
-                  <option value="Reparto socios">Reparto socios</option>
-                </select>
-              </div>
-              <div className="field-group">
-                <label className="label">Categoría Principal</label>
-                <input className="input" value={newCat} onChange={(event) => setNewCat(event.target.value)} required placeholder="Ej: Inversión en Publicidad" />
-              </div>
-              <div className="field-group">
-                <label className="label">Subcategoría</label>
-                <input className="input" value={newSubcat} onChange={(event) => setNewSubcat(event.target.value)} required placeholder="Ej: Inversión en Meta Ads" />
-              </div>
-              <button className="btn btn-primary" type="submit" disabled={submitting || loading}>➕ Agregar</button>
-            </form>
-            <Table data={data} columns={[{ key: 'dominio', label: 'Dominio' }, { key: 'categoria', label: 'Categoría' }, { key: 'subcategoria', label: 'Subcategoría' }]} onEdit={openEditModal} onDelete={handleDelete} loading={loading} />
           </>
         )}
 

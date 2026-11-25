@@ -9,11 +9,7 @@ const SHEETS_SCHEMA = [
   },
   {
     name: 'gastos',
-    headers: ['id', 'estado', 'fecha_gasto', 'fecha_registro', 'concepto', 'categoria', 'subcategoria', 'banco_id', 'banco', 'monto', 'dominio', 'proveedor', 'nota'],
-  },
-  {
-    name: 'repartos',
-    headers: ['id', 'estado', 'fecha_movimiento', 'fecha_registro', 'concepto', 'categoria', 'subcategoria', 'dominio', 'proveedor', 'nota', 'banco_id', 'banco', 'monto'],
+    headers: ['id', 'estado', 'fecha_gasto', 'fecha_registro', 'concepto', 'categoria', 'subcategoria', 'banco_id', 'banco', 'monto'],
   },
   {
     name: 'bancos',
@@ -76,26 +72,6 @@ const SHEETS_SCHEMA = [
   {
     name: 'config_categorias',
     headers: ['id', 'categoria', 'subcategoria'],
-  },
-  {
-    name: 'config_categorias_reparto',
-    headers: ['id', 'dominio', 'categoria', 'subcategoria'],
-  },
-  {
-    name: 'config_conceptos_gasto',
-    headers: ['id', 'nombre'],
-  },
-  {
-    name: 'config_proveedores_gasto',
-    headers: ['id', 'nombre'],
-  },
-  {
-    name: 'config_conceptos_reparto',
-    headers: ['id', 'nombre'],
-  },
-  {
-    name: 'config_proveedores_reparto',
-    headers: ['id', 'nombre'],
   },
   {
     name: 'config_bancos',

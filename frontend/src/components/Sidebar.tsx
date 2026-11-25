@@ -12,7 +12,6 @@ const navItems = [
   { href: '/clientes', label: 'Clientes', icon: '👥', adminOnly: false },
   { href: '/ingresos', label: 'Ingresos', icon: '💰', adminOnly: true },
   { href: '/gastos', label: 'Gastos', icon: '📤', adminOnly: true },
-  { href: '/repartos', label: 'Reparto e Inversiones', icon: '🤝', adminOnly: true },
   { href: '/bancos', label: 'Bancos', icon: '🏦', adminOnly: true },
   { href: '/depositos-totales', label: 'Depósitos Totales', icon: '💵', adminOnly: true },
   { href: '/bonos-totales', label: 'Bonos Totales', icon: '🎁', adminOnly: true },

@@ -21,24 +21,6 @@ async function ensureSchemaAligned() {
   }
 
   await writeHeaders(sheets, spreadsheetId);
-
-  // Migracion aditiva e idempotente de gastos/repartos. Un fallo aqui no debe impedir el arranque.
-  try {
-    const { runMigration } = require('./gastosRepartosMigration.service');
-    await runMigration({
-      apply: true,
-      prune: true,
-      sheets,
-      spreadsheetId,
-      log: (message) => logger.info(message, { context: { component: 'gastosRepartosMigration' } }),
-    });
-  } catch (error) {
-    logger.error('gastos/repartos migration failed', {
-      context: { component: 'gastosRepartosMigration' },
-      error,
-    });
-  }
-
   return { skipped: false, created };
 }
 

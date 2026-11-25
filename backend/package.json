@@ -9,7 +9,6 @@
     "sheets:setup": "node scripts/setupSheets.js",
     "sheets:verify": "node scripts/verifySheetsSetup.js",
     "sheets:e2e": "node scripts/verifySheetsE2E.js",
-    "migrate:gastos-repartos": "node scripts/migrateGastosRepartos.js",
     "clientes:repair": "node scripts/repairClientesData.js",
     "backup:sheets": "node scripts/backupSheets.mjs",
     "restore:sheets": "node scripts/restoreSheets.mjs",
