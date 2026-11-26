@@ -404,13 +404,13 @@ export default function GastosPage() {
                       subcategoria: config?.categorias[nextCategoria]?.[0] || '',
                     }));
                   }} required>
-                    {Object.keys(config.categorias).map((cat) => <option key={cat} value={cat}>{cat}</option>)}
+                    {[...Object.keys(config.categorias), ...(editForm.categoria && !config.categorias[editForm.categoria] ? [editForm.categoria] : [])].map((cat) => <option key={cat} value={cat}>{cat}</option>)}
                   </select>
                 </label>
                 <label className="field-group">
                   <span className="label">Subcategoría</span>
                   <select className="select" value={editForm.subcategoria} onChange={(e) => setEditForm((current) => ({ ...current, subcategoria: e.target.value }))}>
-                    {(config.categorias[editForm.categoria] || []).map((sub) => <option key={sub} value={sub}>{sub}</option>)}
+                    {[...(config.categorias[editForm.categoria] || []), ...(editForm.subcategoria && !(config.categorias[editForm.categoria] || []).includes(editForm.subcategoria) ? [editForm.subcategoria] : [])].map((sub) => <option key={sub} value={sub}>{sub}</option>)}
                   </select>
                 </label>
                 <label className="field-group">
